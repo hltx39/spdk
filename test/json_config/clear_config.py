@@ -25,24 +25,24 @@ def get_bdev_name(bdev):
             bdev_name = bdev['params']['base_name']
         elif 'base_bdev' in bdev['params']:
             bdev_name = bdev['params']['base_bdev']
-    if 'method' in bdev and bdev['method'] == 'construct_error_bdev':
+    if 'method' in bdev and bdev['method'] == 'bdev_error_create':
         bdev_name = "EE_%s" % bdev_name
     return bdev_name
 
 
 def get_bdev_destroy_method(bdev):
-    destroy_method_map = {'construct_malloc_bdev': "delete_malloc_bdev",
-                          'construct_null_bdev': "delete_null_bdev",
+    destroy_method_map = {'bdev_malloc_create': "delete_malloc_bdev",
+                          'bdev_null_create': "bdev_null_delete",
                           'construct_rbd_bdev': "delete_rbd_bdev",
-                          'construct_pmem_bdev': "delete_pmem_bdev",
-                          'construct_aio_bdev': "delete_aio_bdev",
-                          'construct_error_bdev': "delete_error_bdev",
+                          'bdev_pmem_create': "bdev_pmem_delete",
+                          'bdev_aio_create': "bdev_aio_delete",
+                          'bdev_error_create': "bdev_error_delete",
                           'construct_split_vbdev': "destruct_split_vbdev",
                           'construct_virtio_dev': "remove_virtio_bdev",
-                          'construct_crypto_bdev': "delete_crypto_bdev",
+                          'bdev_crypto_create': "bdev_crypto_delete",
                           'bdev_delay_create': "bdev_delay_delete",
                           'construct_passthru_bdev': "delete_passthru_bdev",
-                          'construct_compress_bdev': 'delete_compress_bdev',
+                          'bdev_compress_create': 'bdev_compress_delete',
                           }
     destroy_method = None
     if 'method' in bdev:
@@ -62,12 +62,12 @@ def clear_bdev_subsystem(args, bdev_config):
         if destroy_method:
             args.client.call(destroy_method, {bdev_name_key: bdev_name})
 
-    nvme_controllers = args.client.call("get_nvme_controllers")
+    nvme_controllers = args.client.call("bdev_nvme_get_controllers")
     for ctrlr in nvme_controllers:
         args.client.call('delete_nvme_controller', {'name': ctrlr['name']})
 
     ''' Disable and reset hotplug '''
-    rpc.bdev.set_bdev_nvme_hotplug(args.client, False)
+    rpc.bdev.bdev_nvme_set_hotplug(args.client, False)
 
 
 def get_nvmf_destroy_method(nvmf):

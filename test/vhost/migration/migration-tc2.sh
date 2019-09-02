@@ -9,7 +9,7 @@ function migration_tc2_cleanup_nvmf_tgt()
 		return
 	fi
 
-	if [[ ! -z "$1" ]]; then
+	if [[ -n "$1" ]]; then
 		trap 'error_exit "${FUNCNAME}" "${LINENO}"' INT ERR EXIT
 		pkill --signal $1 -F $nvmf_dir/nvmf_tgt.pid || true
 		sleep 5
@@ -86,8 +86,8 @@ function migration_tc2_configure_vhost()
 
 	# Run nvmf_tgt and two vhost instances:
 	# nvmf_tgt uses core id 2 (-m 0x4)
-	# First uses core id 0 (vhost_0_reactor_mask=0x1)
-	# Second uses core id 1 (vhost_1_reactor_mask=0x2)
+	# First uses core id 0
+	# Second uses core id 1
 	# This force to use VM 1 and 2.
 	timing_enter start_nvmf_tgt
 	notice "Running nvmf_tgt..."
@@ -102,11 +102,8 @@ function migration_tc2_configure_vhost()
 	$rootdir/scripts/gen_nvme.sh --json | $rpc_nvmf load_subsystem_config
 	timing_exit start_nvmf_tgt
 
-	vhost_run --memory=512 --vhost-num=0 --no-pci
-	# Those are global intentionally
-	vhost_1_reactor_mask=0x2
-	vhost_1_master_core=1
-	vhost_run --memory=512 --vhost-num=1 --no-pci
+	vhost_run 0 "-m 0x1 -s 512 -u"
+	vhost_run 1 "-m 0x2 -s 512 -u"
 
 	local rdma_ip_list=$(get_available_rdma_ips)
 	local nvmf_target_ip=$(echo "$rdma_ip_list" | head -n 1)
@@ -132,9 +129,9 @@ function migration_tc2_configure_vhost()
 
 	notice "Setting up VMs"
 	vm_setup --os="$os_image" --force=$incoming_vm --disk-type=spdk_vhost_scsi --disks=VhostScsi0 \
-		--migrate-to=$target_vm  --memory=1024 --vhost-num=0
+		--migrate-to=$target_vm  --memory=1024 --vhost-name=0
 	vm_setup --force=$target_vm --disk-type=spdk_vhost_scsi --disks=VhostScsi0 --incoming=$incoming_vm --memory=1024 \
-		--vhost-num=1
+		--vhost-name=1
 
 	# Run everything
 	vm_run $incoming_vm $target_vm

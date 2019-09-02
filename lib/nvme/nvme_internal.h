@@ -123,6 +123,12 @@ extern pid_t g_spdk_nvme_pid;
  */
 #define NVME_QUIRK_SHST_COMPLETE 0x200
 
+/*
+ * The controller requires an extra delay before starting the initialization process
+ * during attach.
+ */
+#define NVME_QUIRK_DELAY_BEFORE_INIT 0x400
+
 #define NVME_MAX_ASYNC_EVENTS	(8)
 
 #define NVME_MAX_ADMIN_TIMEOUT_IN_SECS	(30)
@@ -140,6 +146,8 @@ extern pid_t g_spdk_nvme_pid;
 
 #define DEFAULT_ADMIN_QUEUE_REQUESTS	(32)
 #define DEFAULT_IO_QUEUE_REQUESTS	(512)
+
+#define SPDK_NVME_DEFAULT_RETRY_COUNT	(4)
 
 #define MIN_KEEP_ALIVE_TIMEOUT_IN_MS	(10000)
 

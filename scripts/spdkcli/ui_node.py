@@ -85,14 +85,14 @@ class UILvolStores(UINode):
 
     def refresh(self):
         self._children = set([])
-        for lvs in self.get_root().get_lvol_stores():
+        for lvs in self.get_root().bdev_lvol_get_lvstores():
             UILvsObj(lvs, self)
 
     def delete(self, name, uuid):
         if name is None and uuid is None:
             self.shell.log.error("Please specify one of the identifiers: "
                                  "lvol store name or UUID")
-        self.get_root().delete_lvol_store(lvs_name=name, uuid=uuid)
+        self.get_root().bdev_lvol_delete_lvstore(lvs_name=name, uuid=uuid)
 
     def ui_command_create(self, name, bdev_name, cluster_size=None):
         """
@@ -105,7 +105,7 @@ class UILvolStores(UINode):
         """
 
         cluster_size = self.ui_eval_param(cluster_size, "number", None)
-        self.get_root().create_lvol_store(lvs_name=name, bdev_name=bdev_name, cluster_sz=cluster_size)
+        self.get_root().bdev_lvol_create_lvstore(lvs_name=name, bdev_name=bdev_name, cluster_sz=cluster_size)
 
     def ui_command_delete(self, name=None, uuid=None):
         """
@@ -203,7 +203,7 @@ class UIAIOBdev(UIBdev):
         UIBdev.__init__(self, "aio", parent)
 
     def delete(self, name):
-        self.get_root().delete_aio_bdev(name=name)
+        self.get_root().bdev_aio_delete(name=name)
 
     def ui_command_create(self, name, filename, block_size):
         """
@@ -218,7 +218,7 @@ class UIAIOBdev(UIBdev):
         """
 
         block_size = self.ui_eval_param(block_size, "number", None)
-        ret_name = self.get_root().create_aio_bdev(name=name,
+        ret_name = self.get_root().bdev_aio_create(name=name,
                                                    block_size=int(block_size),
                                                    filename=filename)
         self.shell.log.info(ret_name)
@@ -238,7 +238,7 @@ class UILvolBdev(UIBdev):
         UIBdev.__init__(self, "logical_volume", parent)
 
     def delete(self, name):
-        self.get_root().destroy_lvol_bdev(name=name)
+        self.get_root().bdev_lvol_delete(name=name)
 
     def ui_command_create(self, name, size, lvs, thin_provision=None):
         """
@@ -324,7 +324,7 @@ class UINullBdev(UIBdev):
         UIBdev.__init__(self, "null", parent)
 
     def delete(self, name):
-        self.get_root().delete_null_bdev(name=name)
+        self.get_root().bdev_null_delete(name=name)
 
     def ui_command_create(self, name, size, block_size, uuid=None):
         """
@@ -341,7 +341,7 @@ class UINullBdev(UIBdev):
         size = self.ui_eval_param(size, "number", None)
         block_size = self.ui_eval_param(block_size, "number", None)
         num_blocks = size * 1024 * 1024 // block_size
-        ret_name = self.get_root().create_null_bdev(num_blocks=num_blocks,
+        ret_name = self.get_root().bdev_null_create(num_blocks=num_blocks,
                                                     block_size=block_size,
                                                     name=name, uuid=uuid)
         self.shell.log.info(ret_name)
@@ -361,7 +361,7 @@ class UIErrorBdev(UIBdev):
         UIBdev.__init__(self, "error", parent)
 
     def delete(self, name):
-        self.get_root().delete_error_bdev(name=name)
+        self.get_root().bdev_error_delete(name=name)
 
     def ui_command_create(self, base_name):
         """
@@ -423,7 +423,7 @@ class UIPmemBdev(UIBdev):
         UIBdev.__init__(self, "pmemblk", parent)
 
     def delete(self, name):
-        self.get_root().delete_pmem_bdev(name=name)
+        self.get_root().bdev_pmem_delete(name=name)
 
     def ui_command_create_pmem_pool(self, pmem_file, total_size, block_size):
         total_size = self.ui_eval_param(total_size, "number", None)
@@ -442,7 +442,7 @@ class UIPmemBdev(UIBdev):
         self.shell.log.info(json.dumps(ret, indent=2))
 
     def ui_command_create(self, pmem_file, name):
-        ret_name = self.get_root().create_pmem_bdev(pmem_file=pmem_file,
+        ret_name = self.get_root().bdev_pmem_create(pmem_file=pmem_file,
                                                     name=name)
         self.shell.log.info(ret_name)
 
@@ -487,7 +487,7 @@ class UIiSCSIBdev(UIBdev):
         UIBdev.__init__(self, "iscsi", parent)
 
     def delete(self, name):
-        self.get_root().delete_iscsi_bdev(name=name)
+        self.get_root().bdev_iscsi_delete(name=name)
 
     def ui_command_create(self, name, url, initiator_iqn):
         """

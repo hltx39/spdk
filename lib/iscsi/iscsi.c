@@ -73,6 +73,7 @@ struct spdk_iscsi_globals g_spdk_iscsi = {
 	.ig_head = TAILQ_HEAD_INITIALIZER(g_spdk_iscsi.ig_head),
 	.target_head = TAILQ_HEAD_INITIALIZER(g_spdk_iscsi.target_head),
 	.auth_group_head = TAILQ_HEAD_INITIALIZER(g_spdk_iscsi.auth_group_head),
+	.poll_group_head = TAILQ_HEAD_INITIALIZER(g_spdk_iscsi.poll_group_head),
 };
 
 /* random value generation */
@@ -1458,9 +1459,9 @@ iscsi_op_login_session_normal(struct spdk_iscsi_conn *conn,
 			      struct spdk_iscsi_pdu *rsp_pdu,
 			      char *initiator_port_name,
 			      struct iscsi_param *params,
-			      struct spdk_iscsi_tgt_node **target,
 			      int cid)
 {
+	struct spdk_iscsi_tgt_node *target = NULL;
 	const char *target_name;
 	const char *target_short_name;
 	struct iscsi_bhs_login_rsp *rsph;
@@ -1494,17 +1495,17 @@ iscsi_op_login_session_normal(struct spdk_iscsi_conn *conn,
 	}
 
 	pthread_mutex_lock(&g_spdk_iscsi.mutex);
-	rc = iscsi_op_login_check_target(conn, rsp_pdu, target_name, target);
+	rc = iscsi_op_login_check_target(conn, rsp_pdu, target_name, &target);
 	pthread_mutex_unlock(&g_spdk_iscsi.mutex);
 
 	if (rc < 0) {
 		return rc;
 	}
 
-	conn->target = *target;
-	conn->dev = (*target)->dev;
-	conn->target_port = spdk_scsi_dev_find_port_by_id((*target)->dev,
-			    conn->portal->group->tag);
+	conn->target = target;
+	conn->dev = target->dev;
+	conn->target_port = spdk_scsi_dev_find_port_by_id(target->dev,
+			    conn->pg_tag);
 
 	rc = iscsi_op_login_check_session(conn, rsp_pdu,
 					  initiator_port_name, cid);
@@ -1513,12 +1514,12 @@ iscsi_op_login_session_normal(struct spdk_iscsi_conn *conn,
 	}
 
 	/* force target flags */
-	pthread_mutex_lock(&((*target)->mutex));
-	rc = iscsi_op_login_negotiate_chap_param(conn, *target);
-	pthread_mutex_unlock(&((*target)->mutex));
+	pthread_mutex_lock(&target->mutex);
+	rc = iscsi_op_login_negotiate_chap_param(conn, target);
+	pthread_mutex_unlock(&target->mutex);
 
 	if (rc == 0) {
-		rc = iscsi_op_login_negotiate_digest_param(conn, *target);
+		rc = iscsi_op_login_negotiate_digest_param(conn, target);
 	}
 
 	if (rc != 0) {
@@ -1622,12 +1623,14 @@ static int
 iscsi_op_login_set_conn_info(struct spdk_iscsi_conn *conn,
 			     struct spdk_iscsi_pdu *rsp_pdu,
 			     char *initiator_port_name,
-			     enum session_type session_type,
-			     struct spdk_iscsi_tgt_node *target, int cid)
+			     enum session_type session_type, int cid)
 {
 	int rc = 0;
+	struct spdk_iscsi_tgt_node *target;
 	struct iscsi_bhs_login_rsp *rsph;
 	struct spdk_scsi_port *initiator_port;
+
+	target = conn->target;
 
 	rsph = (struct iscsi_bhs_login_rsp *)&rsp_pdu->bhs;
 	conn->authenticated = false;
@@ -1692,13 +1695,12 @@ static int
 iscsi_op_login_set_target_info(struct spdk_iscsi_conn *conn,
 			       struct spdk_iscsi_pdu *rsp_pdu,
 			       enum session_type session_type,
-			       int alloc_len,
-			       struct spdk_iscsi_tgt_node *target)
+			       int alloc_len)
 {
 	char buf[MAX_TMPBUF];
 	const char *val;
 	int rc = 0;
-	struct spdk_iscsi_portal *portal = conn->portal;
+	struct spdk_iscsi_tgt_node *target = conn->target;
 
 	/* declarative parameters */
 	if (target != NULL) {
@@ -1715,14 +1717,14 @@ iscsi_op_login_set_target_info(struct spdk_iscsi_conn *conn,
 			return SPDK_ISCSI_LOGIN_ERROR_PARAMETER;
 		}
 	}
-	snprintf(buf, sizeof buf, "%s:%s,%d", portal->host, portal->port,
-		 portal->group->tag);
+	snprintf(buf, sizeof buf, "%s:%s,%d", conn->portal_host, conn->portal_port,
+		 conn->pg_tag);
 	rc = spdk_iscsi_param_set(conn->sess->params, "TargetAddress", buf);
 	if (rc < 0) {
 		SPDK_ERRLOG("iscsi_param_set() failed\n");
 		return SPDK_ISCSI_LOGIN_ERROR_PARAMETER;
 	}
-	snprintf(buf, sizeof buf, "%d", portal->group->tag);
+	snprintf(buf, sizeof buf, "%d", conn->pg_tag);
 	rc = spdk_iscsi_param_set(conn->sess->params, "TargetPortalGroupTag", buf);
 	if (rc < 0) {
 		SPDK_ERRLOG("iscsi_param_set() failed\n");
@@ -1773,7 +1775,6 @@ iscsi_op_login_phase_none(struct spdk_iscsi_conn *conn,
 	enum session_type session_type;
 	char initiator_port_name[MAX_INITIATOR_PORT_NAME];
 	struct iscsi_bhs_login_rsp *rsph;
-	struct spdk_iscsi_tgt_node *target = NULL;
 	int rc = 0;
 	rsph = (struct iscsi_bhs_login_rsp *)&rsp_pdu->bhs;
 
@@ -1795,13 +1796,12 @@ iscsi_op_login_phase_none(struct spdk_iscsi_conn *conn,
 	if (session_type == SESSION_TYPE_NORMAL) {
 		rc = iscsi_op_login_session_normal(conn, rsp_pdu,
 						   initiator_port_name,
-						   params, &target, cid);
+						   params, cid);
 		if (rc < 0) {
 			return rc;
 		}
 
 	} else if (session_type == SESSION_TYPE_DISCOVERY) {
-		target = NULL;
 		rsph->tsih = 0;
 
 		/* force target flags */
@@ -1820,7 +1820,7 @@ iscsi_op_login_phase_none(struct spdk_iscsi_conn *conn,
 	}
 
 	rc = iscsi_op_login_set_conn_info(conn, rsp_pdu, initiator_port_name,
-					  session_type, target, cid);
+					  session_type, cid);
 	if (rc < 0) {
 		return rc;
 	}
@@ -1838,7 +1838,7 @@ iscsi_op_login_phase_none(struct spdk_iscsi_conn *conn,
 	}
 
 	return iscsi_op_login_set_target_info(conn, rsp_pdu, session_type,
-					      alloc_len, target);
+					      alloc_len);
 }
 
 /*
@@ -2081,7 +2081,7 @@ iscsi_op_login_notify_session_info(struct spdk_iscsi_conn *conn,
 			      " CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 			      conn->initiator_name, conn->initiator_addr,
 			      conn->target->name, conn->target->num,
-			      conn->portal->host, conn->portal->port, conn->portal->group->tag,
+			      conn->portal_host, conn->portal_port, conn->pg_tag,
 			      conn->sess->isid, conn->sess->tsih, conn->cid,
 			      (spdk_iscsi_param_eq_val(conn->params, "HeaderDigest", "CRC32C")
 			       ? "on" : "off"),
@@ -2093,7 +2093,7 @@ iscsi_op_login_notify_session_info(struct spdk_iscsi_conn *conn,
 			      " (%s:%s,%d), ISID=%"PRIx64", TSIH=%u,"
 			      " CID=%u, HeaderDigest=%s, DataDigest=%s\n",
 			      conn->initiator_name, conn->initiator_addr,
-			      conn->portal->host, conn->portal->port, conn->portal->group->tag,
+			      conn->portal_host, conn->portal_port, conn->pg_tag,
 			      conn->sess->isid, conn->sess->tsih, conn->cid,
 			      (spdk_iscsi_param_eq_val(conn->params, "HeaderDigest", "CRC32C")
 			       ? "on" : "off"),
@@ -4758,7 +4758,7 @@ create_iscsi_sess(struct spdk_iscsi_conn *conn,
 
 	pthread_mutex_unlock(&g_spdk_iscsi.mutex);
 
-	sess->tag = conn->portal->group->tag;
+	sess->tag = conn->pg_tag;
 
 	sess->conns = calloc(sess->MaxConnections, sizeof(*sess->conns));
 	if (!sess->conns) {
@@ -4908,7 +4908,7 @@ append_iscsi_sess(struct spdk_iscsi_conn *conn,
 		SPDK_ERRLOG("spdk_get_iscsi_sess_by_tsih failed\n");
 		return ISCSI_LOGIN_CONN_ADD_FAIL;
 	}
-	if ((conn->portal->group->tag != sess->tag) ||
+	if ((conn->pg_tag != sess->tag) ||
 	    (strcasecmp(initiator_port_name, spdk_scsi_port_get_name(sess->initiator_port)) != 0) ||
 	    (conn->target != sess->target)) {
 		/* no match */

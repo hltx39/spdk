@@ -2,6 +2,69 @@
 
 ## v19.10: (Upcoming Release)
 
+### nvmf
+
+The `spdk_nvmf_tgt_create` function now accepts an object of type `spdk_nvmf_target_opts`
+as its only parameter. This new structure contains the max_subsystems parameter previously
+passed into that function.
+
+A new public API function `spdk_nvmf_get_tgt` has been added which allows users to
+retrieve a pointer to an `spdk_nvmf_tgt` object by supplying its name. In the special
+case where an RPC or application only creates a single target, this function can accept
+a null name parameter and will return the only available target.
+
+The majority of the NVMe-oF RPCs now accept an optional tgt_name parameter. This will
+allow those RPCs to work with applications that create more than one target.
+
+### bdev
+
+A new spdk_bdev_open_ext function has been added and spdk_bdev_open function has been deprecated.
+The new open function introduces requirement to provide callback function that will be called by
+asynchronous event such as bdev removal. spdk_bdev_open_ext function takes bdev name as
+an argument instead of bdev structure to avoid a race condition that can happen when the bdev
+is being removed between a call to get its structure based on a name and actually openning it.
+
+### nvme
+
+Added `no_shn_notification` to NVMe controller initialization options, users can enable
+it for NVMe controllers.  When the option is enabled, the controller will not do the
+shutdown process and just disable the controller, users can start their application
+later again to initialize the controller to the ready state.
+
+### iSCSI
+
+Portals may no longer be associated with a cpumask. The scheduling of
+connections is moving to a more dynamic model.
+
+### delay bdev
+
+The `bdev_delay_update_latency` has been added to allow users to update
+a latency value for a given delay bdev.
+
+### compress bdev
+
+A new RPC `bdev_compress_get_orphans` has been added to list compress bdevs
+that were not loaded due to a missing pm metadata file. In this state they
+can only be deleted.
+
+### null bdev
+
+Metadata support has been added to Null bdev module.
+
+Protection information support has been added to Null bdev module.
+
+### event
+
+start_subsystem_init RPC no longer stops the application on error during
+initialization.
+
+### rpc
+
+Added optional parameter '--md-size'to 'construct_null_bdev' RPC method.
+
+Added optional parameters '--dif-type' and '--dif-is-head-of-md' to 'construct_null_bdev'
+RPC method.
+
 ## v19.07:
 
 ### ftl

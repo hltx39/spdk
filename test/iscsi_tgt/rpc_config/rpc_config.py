@@ -101,7 +101,7 @@ def verify_iscsi_connection_rpc_methods(rpc_py):
     verify(not jsonvalue, 1,
            "get_iscsi_connections returned {}, expected empty".format(jsonvalue))
 
-    rpc.construct_malloc_bdev(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
+    rpc.bdev_malloc_create(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
     rpc.add_portal_group(portal_tag, "{}:{}".format(rpc_param['target_ip'], str(rpc_param['port'])))
     rpc.add_initiator_group(initiator_tag, rpc_param['initiator_name'], rpc_param['netmask'])
 
@@ -142,7 +142,7 @@ def verify_scsi_devices_rpc_methods(rpc_py):
     verify(not jsonvalue, 1,
            "get_scsi_devices returned {}, expected empty".format(jsonvalue))
 
-    rpc.construct_malloc_bdev(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
+    rpc.bdev_malloc_create(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
     rpc.add_portal_group(portal_tag, "{}:{}".format(rpc_param['target_ip'], str(rpc_param['port'])))
     rpc.add_initiator_group(initiator_tag, rpc_param['initiator_name'], rpc_param['netmask'])
 
@@ -179,7 +179,7 @@ def create_malloc_bdevs_rpc_methods(rpc_py, rpc_param):
     rpc = spdk_rpc(rpc_py)
 
     for i in range(1, rpc_param['lun_total'] + 1):
-        rpc.construct_malloc_bdev(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
+        rpc.bdev_malloc_create(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
 
     print("create_malloc_bdevs_rpc_methods passed")
 
@@ -199,7 +199,7 @@ def verify_portal_groups_rpc_methods(rpc_py, rpc_param):
     for idx, value in enumerate(lo_ip):
         # The portal group tag must start at 1
         tag = idx + 1
-        rpc.add_portal_group(tag, "{}:{}@{}".format(value, rpc_param['port'], rpc_param['cpumask']))
+        rpc.add_portal_group(tag, "{}:{}".format(value, rpc_param['port']))
         output = rpc.get_portal_groups()
         jsonvalues = json.loads(output)
         verify(len(jsonvalues) == tag, 1,
@@ -211,8 +211,6 @@ def verify_portal_groups_rpc_methods(rpc_py, rpc_param):
                "host value is {}, expected {}".format(value['portals'][0]['host'], rpc_param['target_ip']))
         verify(value['portals'][0]['port'] == str(rpc_param['port']), 1,
                "port value is {}, expected {}".format(value['portals'][0]['port'], str(rpc_param['port'])))
-        verify(value['portals'][0]['cpumask'] == format(rpc_param['cpumask'], '#x'), 1,
-               "cpumask value is {}, expected {}".format(value['portals'][0]['cpumask'], format(rpc_param['cpumask'], '#x')))
         tag_list.append(value['tag'])
         verify(value['tag'] == idx + 1, 1,
                "tag value is {}, expected {}".format(value['tag'], idx + 1))
@@ -231,8 +229,6 @@ def verify_portal_groups_rpc_methods(rpc_py, rpc_param):
                    "host value is {}, expected {}".format(jvalue['portals'][0]['host'], lo_ip[idx + jidx + 1]))
             verify(jvalue['portals'][0]['port'] == str(rpc_param['port']), 1,
                    "port value is {}, expected {}".format(jvalue['portals'][0]['port'], str(rpc_param['port'])))
-            verify(jvalue['portals'][0]['cpumask'] == format(rpc_param['cpumask'], '#x'), 1,
-                   "cpumask value is {}, expected {}".format(jvalue['portals'][0]['cpumask'], format(rpc_param['cpumask'], '#x')))
             verify(jvalue['tag'] != value or jvalue['tag'] == tag_list[idx + jidx + 1], 1,
                    "tag value is {}, expected {} and not {}".format(jvalue['tag'], tag_list[idx + jidx + 1], value))
 
@@ -334,7 +330,7 @@ def verify_target_nodes_rpc_methods(rpc_py, rpc_param):
     verify(not jsonvalues, 1,
            "get_target_nodes returned {}, expected empty".format(jsonvalues))
 
-    rpc.construct_malloc_bdev(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
+    rpc.bdev_malloc_create(rpc_param['malloc_bdev_size'], rpc_param['malloc_block_size'])
     rpc.add_portal_group(portal_tag, "{}:{}".format(rpc_param['target_ip'], str(rpc_param['port'])))
     rpc.add_initiator_group(initiator_tag, rpc_param['initiator_name'], rpc_param['netmask'])
 

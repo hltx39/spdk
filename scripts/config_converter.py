@@ -9,12 +9,12 @@ from collections import OrderedDict
 bdev_dict = OrderedDict()
 bdev_dict["set_bdev_options"] = []
 bdev_dict["construct_split_vbdev"] = []
-bdev_dict["set_bdev_nvme_options"] = []
+bdev_dict["bdev_nvme_set_options"] = []
 bdev_dict["construct_nvme_bdev"] = []
-bdev_dict["set_bdev_nvme_hotplug"] = []
-bdev_dict["construct_malloc_bdev"] = []
-bdev_dict["construct_aio_bdev"] = []
-bdev_dict["construct_pmem_bdev"] = []
+bdev_dict["bdev_nvme_set_hotplug"] = []
+bdev_dict["bdev_malloc_create"] = []
+bdev_dict["bdev_aio_create"] = []
+bdev_dict["bdev_pmem_create"] = []
 bdev_dict["construct_virtio_dev"] = []
 
 vhost_dict = OrderedDict()
@@ -174,7 +174,7 @@ def get_aio_bdev_json(config, section):
             params['block_size'] = int(items[2])
         aio_json.append({
             "params": params,
-            "method": "construct_aio_bdev"
+            "method": "bdev_aio_create"
         })
 
     return aio_json
@@ -196,7 +196,7 @@ def get_malloc_bdev_json(config, section):
                 "num_blocks": params[1][3] * 1024 * 1024 / params[2][3],
                 "name": "Malloc%s" % lun
             },
-            "method": "construct_malloc_bdev"
+            "method": "bdev_malloc_create"
         })
 
     return malloc_json
@@ -238,11 +238,11 @@ def get_nvme_bdev_json(config, section):
     params[6][3] = params[6][3] * 100
     nvme_json.append({
         "params": to_json_params(params[5:7]),
-        "method": "set_bdev_nvme_hotplug"
+        "method": "bdev_nvme_set_hotplug"
     })
     nvme_json.append({
         "params": to_json_params(params[0:5]),
-        "method": "set_bdev_nvme_options"
+        "method": "bdev_nvme_set_options"
     })
     return nvme_json
 
@@ -258,7 +258,7 @@ def get_pmem_bdev_json(config, section):
                         "name": items[1],
                         "pmem_file": items[0]
                     },
-                    "method": "construct_pmem_bdev"
+                    "method": "bdev_pmem_create"
                 })
 
     return pmem_json
@@ -529,8 +529,6 @@ def get_iscsi_portal_group_json(config, name):
                 if "@" in items[1]:
                     portal['port'] =\
                         items[1].rsplit(":", 1)[1].split("@")[0]
-                    portal['cpumask'] =\
-                        items[1].rsplit(":", 1)[1].split("@")[1]
                 else:
                     portal['port'] = items[1].rsplit(":", 1)[1]
                 portals.append(portal)

@@ -18,7 +18,7 @@ nvmfappstart "-m 0xF"
 $rootdir/scripts/gen_nvme.sh --json | $rpc_py load_subsystem_config
 
 local_nvme_trid="trtype:PCIe traddr:"$($rpc_py get_subsystem_config bdev | jq -r '.[].params | select(.name=="Nvme0").traddr')
-bdevs="$bdevs $($rpc_py construct_malloc_bdev $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)"
+bdevs="$bdevs $($rpc_py bdev_malloc_create $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)"
 
 if [ -n "$local_nvme_trid" ]; then
 	bdevs="$bdevs Nvme0n1"
@@ -44,7 +44,7 @@ $rpc_py delete_nvmf_subsystem nqn.2016-06.io.spdk:cnode1
 if [ $RUN_NIGHTLY -eq 1 ]; then
 	# Configure nvme devices with nvmf lvol_bdev backend
 	if [ -n "$local_nvme_trid" ]; then
-		ls_guid=$($rpc_py construct_lvol_store Nvme0n1 lvs_0)
+		ls_guid=$($rpc_py bdev_lvol_create_lvstore Nvme0n1 lvs_0)
 		get_lvs_free_mb $ls_guid
 		# We don't need to create an lvol larger than 20G for this test.
 		# decreasing the size of the nested lvol allows us to take less time setting up
@@ -52,15 +52,15 @@ if [ $RUN_NIGHTLY -eq 1 ]; then
 		if [ $free_mb -gt 20480 ]; then
 			free_mb=20480
 		fi
-		lb_guid=$($rpc_py construct_lvol_bdev -u $ls_guid lbd_0 $free_mb)
+		lb_guid=$($rpc_py bdev_lvol_create -u $ls_guid lbd_0 $free_mb)
 
 		# Create lvol bdev for nested lvol stores
-		ls_nested_guid=$($rpc_py construct_lvol_store $lb_guid lvs_n_0)
+		ls_nested_guid=$($rpc_py bdev_lvol_create_lvstore $lb_guid lvs_n_0)
 		get_lvs_free_mb $ls_nested_guid
 		if [ $free_mb -gt 20480 ]; then
 			free_mb=20480
 		fi
-		lb_nested_guid=$($rpc_py construct_lvol_bdev -u $ls_nested_guid lbd_nest_0 $free_mb)
+		lb_nested_guid=$($rpc_py bdev_lvol_create -u $ls_nested_guid lbd_nest_0 $free_mb)
 		$rpc_py nvmf_subsystem_create nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001
 		for bdev in $lb_nested_guid; do
 			$rpc_py nvmf_subsystem_add_ns nqn.2016-06.io.spdk:cnode1 $bdev
@@ -77,10 +77,10 @@ if [ $RUN_NIGHTLY -eq 1 ]; then
 
 		# Delete subsystems, lvol_bdev and destroy lvol_store.
 		$rpc_py delete_nvmf_subsystem nqn.2016-06.io.spdk:cnode1
-		$rpc_py destroy_lvol_bdev "$lb_nested_guid"
-		$rpc_py destroy_lvol_store -l lvs_n_0
-		$rpc_py destroy_lvol_bdev "$lb_guid"
-		$rpc_py destroy_lvol_store -l lvs_0
+		$rpc_py bdev_lvol_delete "$lb_nested_guid"
+		$rpc_py bdev_lvol_delete_lvstore -l lvs_n_0
+		$rpc_py bdev_lvol_delete "$lb_guid"
+		$rpc_py bdev_lvol_delete_lvstore -l lvs_0
 	fi
 fi
 

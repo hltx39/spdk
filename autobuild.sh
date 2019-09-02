@@ -28,7 +28,7 @@ if [ "$SPDK_TEST_OCF" -eq 1 ]; then
 	# So we precompile OCF now for further use as standalone static library
 	./configure $(echo $config_params | sed 's/--enable-coverage//g')
 	$MAKE $MAKEFLAGS include/spdk/config.h
-	CC=gcc CCAR=ar $MAKE $MAKEFLAGS -C lib/bdev/ocf/env exportlib O=$rootdir/build/ocf.a
+	CC=gcc CCAR=ar $MAKE $MAKEFLAGS -C lib/env_ocf exportlib O=$rootdir/build/ocf.a
 	# Set config to use precompiled library
 	config_params="$config_params --with-ocf=/$rootdir/build/ocf.a"
 fi
@@ -77,9 +77,7 @@ timing_enter "$make_timing_label"
 
 $MAKE $MAKEFLAGS clean
 if [ $SPDK_BUILD_SHARED_OBJECT -eq 1 ]; then
-	./configure $config_params --with-shared
-	$MAKE $MAKEFLAGS
-	$MAKE $MAKEFLAGS clean
+	$rootdir/test/make/check_so_deps.sh
 	report_test_completion "shared_object_build"
 fi
 

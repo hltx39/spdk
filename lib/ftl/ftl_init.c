@@ -732,6 +732,8 @@ _ftl_dev_init_thread(void *ctx)
 	if (spdk_get_thread() == ftl_get_core_thread(dev)) {
 		ftl_anm_register_device(dev, ftl_process_anm_event);
 	}
+
+	thread->ioch = spdk_get_io_channel(dev);
 }
 
 static int
@@ -778,8 +780,10 @@ ftl_dev_free_thread(struct spdk_ftl_dev *dev, struct ftl_thread *thread)
 {
 	assert(thread->poller == NULL);
 
+	spdk_put_io_channel(thread->ioch);
 	spdk_nvme_ctrlr_free_io_qpair(thread->qpair);
 	thread->thread = NULL;
+	thread->ioch = NULL;
 	thread->qpair = NULL;
 }
 
@@ -905,12 +909,26 @@ ftl_clear_nv_cache_cb(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 	}
 }
 
+static void
+_ftl_nv_cache_scrub(void *ctx)
+{
+	struct spdk_ftl_dev *dev = ctx;
+	int rc;
+
+	rc = ftl_nv_cache_scrub(&dev->nv_cache, ftl_clear_nv_cache_cb, dev);
+
+	if (spdk_unlikely(rc != 0)) {
+		SPDK_ERRLOG("Unable to clear the non-volatile cache bdev: %s\n",
+			    spdk_strerror(-rc));
+		ftl_init_fail(dev);
+	}
+}
+
 static int
 ftl_setup_initial_state(struct spdk_ftl_dev *dev)
 {
 	struct spdk_ftl_conf *conf = &dev->conf;
 	size_t i;
-	int rc;
 
 	spdk_uuid_generate(&dev->uuid);
 
@@ -934,12 +952,7 @@ ftl_setup_initial_state(struct spdk_ftl_dev *dev)
 	if (!ftl_dev_has_nv_cache(dev)) {
 		ftl_init_complete(dev);
 	} else {
-		rc = ftl_nv_cache_scrub(&dev->nv_cache, ftl_clear_nv_cache_cb, dev);
-		if (spdk_unlikely(rc != 0)) {
-			SPDK_ERRLOG("Unable to clear the non-volatile cache bdev: %s\n",
-				    spdk_strerror(-rc));
-			return -1;
-		}
+		spdk_thread_send_msg(ftl_get_core_thread(dev), _ftl_nv_cache_scrub, dev);
 	}
 
 	return 0;
@@ -1068,12 +1081,6 @@ ftl_dev_init_io_channel(struct spdk_ftl_dev *dev)
 	spdk_io_device_register(dev, ftl_io_channel_create_cb, ftl_io_channel_destroy_cb,
 				sizeof(struct ftl_io_channel),
 				NULL);
-
-	dev->ioch = spdk_get_io_channel(dev);
-	if (!dev->ioch) {
-		spdk_io_device_unregister(dev, NULL);
-		return -1;
-	}
 
 	return 0;
 }
@@ -1223,13 +1230,19 @@ ftl_dev_free_sync(struct spdk_ftl_dev *dev)
 	pthread_mutex_unlock(&g_ftl_queue_lock);
 
 	assert(LIST_EMPTY(&dev->wptr_list));
+	assert(ftl_rwb_num_acquired(dev->rwb, FTL_RWB_TYPE_INTERNAL) == 0);
+	assert(ftl_rwb_num_acquired(dev->rwb, FTL_RWB_TYPE_USER) == 0);
 
 	ftl_dev_dump_bands(dev);
 	ftl_dev_dump_stats(dev);
 
-	if (dev->ioch) {
-		spdk_put_io_channel(dev->ioch);
-		spdk_io_device_unregister(dev, NULL);
+	spdk_io_device_unregister(dev, NULL);
+
+	if (dev->core_thread.thread) {
+		ftl_dev_free_thread(dev, &dev->core_thread);
+	}
+	if (dev->read_thread.thread) {
+		ftl_dev_free_thread(dev, &dev->read_thread);
 	}
 
 	if (dev->bands) {
@@ -1271,36 +1284,27 @@ ftl_call_fini_complete(struct spdk_ftl_dev *dev, int status)
 }
 
 static void
+ftl_halt_complete_cb(void *ctx)
+{
+	struct spdk_ftl_dev *dev = ctx;
+
+	ftl_call_fini_complete(dev, dev->halt_complete_status);
+}
+
+static void
 ftl_nv_cache_header_fini_cb(struct spdk_bdev_io *bdev_io, bool success, void *cb_arg)
 {
-	int status = 0;
+	struct spdk_ftl_dev *dev = cb_arg;
+	int rc = 0;
 
 	spdk_bdev_free_io(bdev_io);
 	if (spdk_unlikely(!success)) {
 		SPDK_ERRLOG("Failed to write non-volatile cache metadata header\n");
-		status = -EIO;
+		rc = -EIO;
 	}
 
-	ftl_call_fini_complete((struct spdk_ftl_dev *)cb_arg, status);
-}
-
-static void
-ftl_halt_complete_cb(void *ctx)
-{
-	struct spdk_ftl_dev *dev = ctx;
-	struct ftl_nv_cache *nv_cache = &dev->nv_cache;
-	int rc = 0;
-
-	if (!ftl_dev_has_nv_cache(dev)) {
-		ftl_call_fini_complete(dev, 0);
-	} else {
-		rc = ftl_nv_cache_write_header(nv_cache, true, ftl_nv_cache_header_fini_cb, dev);
-		if (spdk_unlikely(rc != 0)) {
-			SPDK_ERRLOG("Failed to write non-volatile cache metadata header: %s\n",
-				    spdk_strerror(-rc));
-			ftl_call_fini_complete(dev, rc);
-		}
-	}
+	dev->halt_complete_status = rc;
+	spdk_thread_send_msg(dev->fini_ctx.thread, ftl_halt_complete_cb, dev);
 }
 
 static int
@@ -1311,12 +1315,14 @@ ftl_halt_poller(void *ctx)
 	if (!dev->core_thread.poller && !dev->read_thread.poller) {
 		spdk_poller_unregister(&dev->fini_ctx.poller);
 
-		ftl_dev_free_thread(dev, &dev->read_thread);
-		ftl_dev_free_thread(dev, &dev->core_thread);
-
 		ftl_anm_unregister_device(dev);
 
-		spdk_thread_send_msg(dev->fini_ctx.thread, ftl_halt_complete_cb, dev);
+		if (ftl_dev_has_nv_cache(dev)) {
+			ftl_nv_cache_write_header(&dev->nv_cache, true, ftl_nv_cache_header_fini_cb, dev);
+		} else {
+			dev->halt_complete_status = 0;
+			spdk_thread_send_msg(dev->fini_ctx.thread, ftl_halt_complete_cb, dev);
+		}
 	}
 
 	return 0;

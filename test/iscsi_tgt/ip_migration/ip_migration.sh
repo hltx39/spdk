@@ -29,7 +29,7 @@ function rpc_config() {
 	# $1 = RPC server address
 	# $2 = Netmask
 	$rpc_py -s $1 add_initiator_group $INITIATOR_TAG $INITIATOR_NAME $2
-	$rpc_py -s $1 construct_malloc_bdev 64 512
+	$rpc_py -s $1 bdev_malloc_create 64 512
 }
 
 function rpc_add_target_node() {
@@ -51,7 +51,7 @@ for ((i = 0; i < 2; i++)); do
 	pid=$!
 	echo "Process pid: $pid"
 
-	trap "kill_all_iscsi_target; exit 1" SIGINT SIGTERM EXIT
+	trap 'kill_all_iscsi_target; exit 1' SIGINT SIGTERM EXIT
 
 	waitforlisten $pid $rpc_addr
 	$rpc_py -s $rpc_addr set_iscsi_options -o 30 -a 64
@@ -61,7 +61,7 @@ for ((i = 0; i < 2; i++)); do
 	timing_exit start_iscsi_tgt_$i
 
 	rpc_config $rpc_addr $NETMASK
-	trap "kill_all_iscsi_target;  iscsitestfini $1 $2; exit 1" \
+	trap 'kill_all_iscsi_target;  iscsitestfini $1 $2; exit 1' \
 		SIGINT SIGTERM EXIT
 done
 

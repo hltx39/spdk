@@ -238,7 +238,6 @@ struct spdk_nvmf_fc_adm_port_link_break_cb_data {
 
 struct spdk_nvmf_fc_transport {
 	struct spdk_nvmf_transport transport;
-	struct spdk_mempool *data_buff_pool;
 	pthread_mutex_t lock;
 };
 
@@ -414,22 +413,6 @@ nvmf_fc_req_in_get_buff(struct spdk_nvmf_fc_request *fc_req)
 	default:
 		return false;
 	}
-}
-
-static void
-nvmf_fc_request_free_buffers(struct spdk_nvmf_fc_request *fc_req)
-{
-	if (fc_req->data_from_pool) {
-		for (uint32_t i = 0; i < fc_req->req.iovcnt; i++) {
-			spdk_mempool_put(fc_req->hwqp->fc_poll_group->fc_transport->data_buff_pool,
-					 fc_req->buffers[i]);
-			fc_req->req.iov[i].iov_base = NULL;
-			fc_req->buffers[i] = NULL;
-		}
-		fc_req->data_from_pool = false;
-	}
-	fc_req->req.data = NULL;
-	fc_req->req.iovcnt  = 0;
 }
 
 void
@@ -1154,7 +1137,7 @@ nvmf_fc_req_in_pending(struct spdk_nvmf_fc_request *fc_req)
 {
 	struct spdk_nvmf_fc_request *tmp = NULL;
 
-	TAILQ_FOREACH(tmp, &fc_req->fc_conn->pending_queue, pending_link) {
+	STAILQ_FOREACH(tmp, &fc_req->fc_conn->pending_data_buf_queue, pending_link) {
 		if (tmp == fc_req) {
 			return true;
 		}
@@ -1275,7 +1258,8 @@ spdk_nvmf_fc_request_abort(struct spdk_nvmf_fc_request *fc_req, bool send_abts,
 		SPDK_DEBUGLOG(SPDK_LOG_NVMF_FC, "Abort req when getting buffers.\n");
 	} else if (nvmf_fc_req_in_pending(fc_req)) {
 		/* Remove from pending */
-		TAILQ_REMOVE(&fc_req->fc_conn->pending_queue, fc_req, pending_link);
+		STAILQ_REMOVE(&fc_req->fc_conn->pending_data_buf_queue, fc_req,
+			      spdk_nvmf_fc_request, pending_link);
 		goto complete;
 	} else {
 		/* Should never happen */
@@ -1290,35 +1274,44 @@ complete:
 				     (void *)fc_req);
 }
 
+static void
+nvmf_fc_request_fill_buffers(struct spdk_nvmf_request *req,
+			     struct spdk_nvmf_transport *transport, uint32_t length)
+{
+	uint32_t i;
+
+	req->iovcnt = 0;
+
+	while (length) {
+		i = req->iovcnt;
+		req->iov[i].iov_base = (void *)((uintptr_t)((char *)req->buffers[i] +
+						NVMF_DATA_BUFFER_MASK) &
+						~NVMF_DATA_BUFFER_MASK);
+		req->iov[i].iov_len  = spdk_min(length, transport->opts.io_unit_size);
+		req->iovcnt++;
+		length -= req->iov[i].iov_len;
+	}
+	req->data_from_pool = true;
+}
+
 static int
 nvmf_fc_request_alloc_buffers(struct spdk_nvmf_fc_request *fc_req)
 {
-	void	 *buf = NULL;
 	uint32_t length = fc_req->req.length;
-	uint32_t i = 0;
-	struct spdk_nvmf_fc_transport *fc_transport = fc_req->hwqp->fc_poll_group->fc_transport;
+	uint32_t num_buffers;
+	struct spdk_nvmf_fc_poll_group *fc_poll_group = fc_req->hwqp->fc_poll_group;
+	struct spdk_nvmf_transport_poll_group *group = &fc_poll_group->tp_poll_group;
+	struct spdk_nvmf_transport *transport = &fc_poll_group->fc_transport->transport;
 
-	fc_req->req.iovcnt = 0;
-	fc_req->data_from_pool = true;
-	while (length) {
-		buf = spdk_mempool_get(fc_transport->data_buff_pool);
-		if (!buf) {
-			goto nomem;
-		}
+	num_buffers = SPDK_CEIL_DIV(length, transport->opts.io_unit_size);
 
-		fc_req->req.iov[i].iov_base = (void *)((unsigned long)((char *)buf + 512) & ~511UL);
-		fc_req->req.iov[i].iov_len  = spdk_min(length,
-						       fc_transport->transport.opts.io_unit_size);
-		fc_req->req.iovcnt++;
-		fc_req->buffers[i] = buf;
-		length -= fc_req->req.iov[i++].iov_len;
+	if (spdk_nvmf_request_get_buffers(&fc_req->req, group, transport, num_buffers)) {
+		return -ENOMEM;
 	}
 
-	return 0;
+	nvmf_fc_request_fill_buffers(&fc_req->req, transport, length);
 
-nomem:
-	nvmf_fc_request_free_buffers(fc_req);
-	return -ENOMEM;
+	return 0;
 }
 
 static int
@@ -1461,7 +1454,7 @@ nvmf_fc_hwqp_handle_request(struct spdk_nvmf_fc_hwqp *hwqp, struct spdk_nvmf_fc_
 
 	nvmf_fc_record_req_trace_point(fc_req, SPDK_NVMF_FC_REQ_INIT);
 	if (nvmf_fc_request_execute(fc_req)) {
-		TAILQ_INSERT_TAIL(&fc_conn->pending_queue, fc_req, pending_link);
+		STAILQ_INSERT_TAIL(&fc_conn->pending_data_buf_queue, fc_req, pending_link);
 	}
 
 	return 0;
@@ -1474,23 +1467,32 @@ nvmf_fc_hwqp_handle_request(struct spdk_nvmf_fc_hwqp *hwqp, struct spdk_nvmf_fc_
 void
 spdk_nvmf_fc_request_free(struct spdk_nvmf_fc_request *fc_req)
 {
+	struct spdk_nvmf_fc_hwqp *hwqp = fc_req->hwqp;
+	struct spdk_nvmf_fc_poll_group *fc_poll_group = hwqp->fc_poll_group;
+	struct spdk_nvmf_transport_poll_group *group = &fc_poll_group->tp_poll_group;
+	struct spdk_nvmf_transport *transport = &fc_poll_group->fc_transport->transport;
+
 	if (!fc_req) {
 		return;
 	}
 
 	if (fc_req->xchg) {
-		nvmf_fc_put_xchg(fc_req->hwqp, fc_req->xchg);
+		nvmf_fc_put_xchg(hwqp, fc_req->xchg);
 		fc_req->xchg = NULL;
 	}
 
 	/* Release IO buffers */
-	nvmf_fc_request_free_buffers(fc_req);
+	if (fc_req->req.data_from_pool) {
+		spdk_nvmf_request_free_buffers(&fc_req->req, group, transport, fc_req->req.iovcnt);
+	}
+	fc_req->req.data = NULL;
+	fc_req->req.iovcnt  = 0;
 
 	/* Release Q buffer */
-	nvmf_fc_rqpair_buffer_release(fc_req->hwqp, fc_req->buf_index);
+	nvmf_fc_rqpair_buffer_release(hwqp, fc_req->buf_index);
 
 	/* Free Fc request */
-	nvmf_fc_hwqp_free_fc_request(fc_req->hwqp, fc_req);
+	nvmf_fc_hwqp_free_fc_request(hwqp, fc_req);
 }
 
 void
@@ -1629,10 +1631,10 @@ spdk_nvmf_fc_hwqp_process_pending_reqs(struct spdk_nvmf_fc_hwqp *hwqp)
 	int budget = 64;
 
 	TAILQ_FOREACH(fc_conn, &hwqp->connection_list, link) {
-		TAILQ_FOREACH_SAFE(fc_req, &fc_conn->pending_queue, pending_link, tmp) {
+		STAILQ_FOREACH_SAFE(fc_req, &fc_conn->pending_data_buf_queue, pending_link, tmp) {
 			if (!nvmf_fc_request_execute(fc_req)) {
 				/* Succesfuly posted, Delete from pending. */
-				TAILQ_REMOVE(&fc_conn->pending_queue, fc_req, pending_link);
+				STAILQ_REMOVE_HEAD(&fc_conn->pending_data_buf_queue, pending_link);
 			}
 
 			if (budget) {
@@ -1861,7 +1863,6 @@ nvmf_fc_opts_init(struct spdk_nvmf_transport_opts *opts)
 static struct spdk_nvmf_transport *
 nvmf_fc_create(struct spdk_nvmf_transport_opts *opts)
 {
-	size_t cache_size;
 	uint32_t sge_count;
 
 	SPDK_INFOLOG(SPDK_LOG_NVMF_FC, "*** FC Transport Init ***\n"
@@ -1907,21 +1908,6 @@ nvmf_fc_create(struct spdk_nvmf_transport_opts *opts)
 		return NULL;
 	}
 
-	/* Create a databuff pool */
-	cache_size = (opts->num_shared_buffers / 2) / spdk_env_get_core_count();
-	cache_size = spdk_min(cache_size, SPDK_MEMPOOL_DEFAULT_CACHE_SIZE);
-
-	g_nvmf_fc_transport->data_buff_pool = spdk_mempool_create("spdk_nvmf_fc_data_buff",
-					      opts->num_shared_buffers,
-					      opts->io_unit_size + 512, cache_size,
-					      SPDK_ENV_SOCKET_ID_ANY);
-
-	if (!g_nvmf_fc_transport->data_buff_pool) {
-		free(g_nvmf_fc_transport);
-		g_nvmf_fc_transport = NULL;
-		return NULL;
-	}
-
 	/* initialize the low level FC driver */
 	nvmf_fc_lld_init();
 
@@ -1936,7 +1922,6 @@ nvmf_fc_destroy(struct spdk_nvmf_transport *transport)
 		struct spdk_nvmf_fc_poll_group *fc_poll_group, *pg_tmp;
 
 		fc_transport = SPDK_CONTAINEROF(transport, struct spdk_nvmf_fc_transport, transport);
-		spdk_mempool_free(fc_transport->data_buff_pool);
 
 		free(fc_transport);
 

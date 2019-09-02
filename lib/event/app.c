@@ -44,8 +44,6 @@
 #include "spdk/rpc.h"
 #include "spdk/util.h"
 
-#include "json_config.h"
-
 #define SPDK_APP_DEFAULT_LOG_LEVEL		SPDK_LOG_NOTICE
 #define SPDK_APP_DEFAULT_LOG_PRINT_LEVEL	SPDK_LOG_INFO
 #define SPDK_APP_DEFAULT_BACKTRACE_LOG_LEVEL	SPDK_LOG_ERROR
@@ -346,8 +344,13 @@ spdk_app_start_application(void)
 }
 
 static void
-spdk_app_start_rpc(void *arg1)
+spdk_app_start_rpc(int rc, void *arg1)
 {
+	if (rc) {
+		spdk_app_stop(rc);
+		return;
+	}
+
 	spdk_rpc_initialize(g_spdk_app.rpc_addr);
 	if (!g_delay_subsystem_init) {
 		spdk_rpc_set_state(SPDK_RPC_RUNTIME);
@@ -1053,22 +1056,21 @@ spdk_app_usage(void)
 }
 
 static void
-spdk_rpc_start_subsystem_init_cpl(void *arg1)
+spdk_rpc_start_subsystem_init_cpl(int rc, void *arg1)
 {
 	struct spdk_jsonrpc_request *request = arg1;
 	struct spdk_json_write_ctx *w;
 
 	assert(spdk_get_thread() == g_app_thread);
 
-	spdk_rpc_set_state(SPDK_RPC_RUNTIME);
-	/* If we're loading JSON config file, we're still operating on a fake,
-	 * temporary RPC server. We'll have to defer calling the app start callback
-	 * until this temporary server is shut down and a real one - listening on
-	 * the proper socket - is started.
-	 */
-	if (g_spdk_app.json_config_file == NULL) {
-		spdk_app_start_application();
+	if (rc) {
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "subsystem_initialization failed");
+		return;
 	}
+
+	spdk_rpc_set_state(SPDK_RPC_RUNTIME);
+	spdk_app_start_application();
 
 	w = spdk_jsonrpc_begin_result(request);
 	spdk_json_write_bool(w, true);

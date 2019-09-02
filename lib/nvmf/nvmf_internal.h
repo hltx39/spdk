@@ -47,6 +47,9 @@
 
 #define SPDK_NVMF_MAX_SGL_ENTRIES	16
 
+/* The maximum number of buffers per request */
+#define NVMF_REQ_MAX_BUFFERS	(SPDK_NVMF_MAX_SGL_ENTRIES * 2)
+
 /* AIO backend requires block size aligned data buffers,
  * extra 4KiB aligned data buffer should work for most devices.
  */
@@ -74,6 +77,8 @@ enum spdk_nvmf_qpair_state {
 typedef void (*spdk_nvmf_state_change_done)(void *cb_arg, int status);
 
 struct spdk_nvmf_tgt {
+	char					name[NVMF_TGT_NAME_MAX_LENGTH];
+
 	uint64_t				discovery_genctr;
 
 	uint32_t				max_subsystems;
@@ -87,6 +92,8 @@ struct spdk_nvmf_tgt {
 
 	spdk_nvmf_tgt_destroy_done_fn		*destroy_cb_fn;
 	void					*destroy_cb_arg;
+
+	TAILQ_ENTRY(spdk_nvmf_tgt)		link;
 };
 
 struct spdk_nvmf_host {
@@ -205,8 +212,10 @@ struct spdk_nvmf_request {
 	void				*data;
 	union nvmf_h2c_msg		*cmd;
 	union nvmf_c2h_msg		*rsp;
-	struct iovec			iov[SPDK_NVMF_MAX_SGL_ENTRIES * 2];
+	void				*buffers[NVMF_REQ_MAX_BUFFERS];
+	struct iovec			iov[NVMF_REQ_MAX_BUFFERS];
 	uint32_t			iovcnt;
+	bool				data_from_pool;
 	struct spdk_bdev_io_wait_entry	bdev_io_wait;
 
 	TAILQ_ENTRY(spdk_nvmf_request)	link;
@@ -372,6 +381,15 @@ void spdk_nvmf_poll_group_resume_subsystem(struct spdk_nvmf_poll_group *group,
 void spdk_nvmf_request_exec(struct spdk_nvmf_request *req);
 int spdk_nvmf_request_free(struct spdk_nvmf_request *req);
 int spdk_nvmf_request_complete(struct spdk_nvmf_request *req);
+
+void spdk_nvmf_request_free_buffers(struct spdk_nvmf_request *req,
+				    struct spdk_nvmf_transport_poll_group *group,
+				    struct spdk_nvmf_transport *transport,
+				    uint32_t num_buffers);
+int spdk_nvmf_request_get_buffers(struct spdk_nvmf_request *req,
+				  struct spdk_nvmf_transport_poll_group *group,
+				  struct spdk_nvmf_transport *transport,
+				  uint32_t num_buffers);
 
 bool spdk_nvmf_request_get_dif_ctx(struct spdk_nvmf_request *req, struct spdk_dif_ctx *dif_ctx);
 

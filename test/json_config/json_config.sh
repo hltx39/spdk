@@ -104,7 +104,7 @@ function json_config_test_start_app() {
 	local app=$1
 	shift
 
-	[[ ! -z "${#app_socket[$app]}" ]] # Check app type
+	[[ -n "${#app_socket[$app]}" ]] # Check app type
 	[[ -z "${app_pid[$app]}" ]] # Assert if app is not running
 
 	local app_extra_params=""
@@ -126,8 +126,8 @@ function json_config_test_shutdown_app() {
 	local app=$1
 
 	# Check app type && assert app was started
-	[[ ! -z "${#app_socket[$app]}" ]]
-	[[ ! -z "${app_pid[$app]}" ]]
+	[[ -n "${#app_socket[$app]}" ]]
+	[[ -n "${app_pid[$app]}" ]]
 
 	# kill_instance RPC will trigger ASAN
 	kill -SIGINT ${app_pid[$app]}
@@ -140,7 +140,7 @@ function json_config_test_shutdown_app() {
 		sleep 0.5
 	done
 
-	if [[ ! -z "${app_pid[$app]}" ]]; then
+	if [[ -n "${app_pid[$app]}" ]]; then
 		echo "SPDK $app shutdown timeout"
 		return 1
 	fi
@@ -168,13 +168,13 @@ function create_bdev_subsystem_config() {
 
 		tgt_rpc construct_split_vbdev $lvol_store_base_bdev 2
 		tgt_rpc construct_split_vbdev Malloc0 3
-		tgt_rpc construct_malloc_bdev 8 4096 --name Malloc3
+		tgt_rpc bdev_malloc_create 8 4096 --name Malloc3
 		tgt_rpc construct_passthru_bdev -b Malloc3 -p PTBdevFromMalloc3
 
-		tgt_rpc construct_null_bdev Null0 32 512
+		tgt_rpc bdev_null_create Null0 32 512
 
-		tgt_rpc construct_malloc_bdev 32 512 --name Malloc0
-		tgt_rpc construct_malloc_bdev 16 4096 --name Malloc1
+		tgt_rpc bdev_malloc_create 32 512 --name Malloc0
+		tgt_rpc bdev_malloc_create 16 4096 --name Malloc1
 
 		expected_notifications+=(
 			bdev_register:${lvol_store_base_bdev}
@@ -193,18 +193,18 @@ function create_bdev_subsystem_config() {
 		if [[ $(uname -s) = Linux ]]; then
 			# This AIO bdev must be large enough to be used as LVOL store
 			dd if=/dev/zero of=/tmp/sample_aio bs=1024 count=102400
-			tgt_rpc construct_aio_bdev /tmp/sample_aio aio_disk 1024
+			tgt_rpc bdev_aio_create /tmp/sample_aio aio_disk 1024
 			expected_notifications+=( bdev_register:aio_disk )
 		fi
 
 		# For LVOLs use split to check for proper order of initialization.
 		# If LVOLs cofniguration will be reordered (eg moved before splits or AIO/NVMe)
 		# it should fail loading JSON config from file.
-		tgt_rpc construct_lvol_store -c 1048576 ${lvol_store_base_bdev}p0 lvs_test
-		tgt_rpc construct_lvol_bdev -l lvs_test lvol0 32
-		tgt_rpc construct_lvol_bdev -l lvs_test -t lvol1 32
-		tgt_rpc snapshot_lvol_bdev     lvs_test/lvol0 snapshot0
-		tgt_rpc clone_lvol_bdev        lvs_test/snapshot0 clone0
+		tgt_rpc bdev_lvol_create_lvstore -c 1048576 ${lvol_store_base_bdev}p0 lvs_test
+		tgt_rpc bdev_lvol_create -l lvs_test lvol0 32
+		tgt_rpc bdev_lvol_create -l lvs_test -t lvol1 32
+		tgt_rpc bdev_lvol_snapshot     lvs_test/lvol0 snapshot0
+		tgt_rpc bdev_lvol_clone        lvs_test/snapshot0 clone0
 
 		expected_notifications+=(
 			"bdev_register:$RE_UUID"
@@ -215,14 +215,14 @@ function create_bdev_subsystem_config() {
 	fi
 
 	if [[ $SPDK_TEST_CRYPTO -eq 1 ]]; then
-		tgt_rpc construct_malloc_bdev 8 1024 --name MallocForCryptoBdev
+		tgt_rpc bdev_malloc_create 8 1024 --name MallocForCryptoBdev
 		if [[ $(lspci -d:37c8 | wc -l) -eq 0 ]]; then
 			local crypto_dirver=crypto_aesni_mb
 		else
 			local crypto_dirver=crypto_qat
 		fi
 
-		tgt_rpc construct_crypto_bdev MallocForCryptoBdev CryptoMallocBdev $crypto_dirver 0123456789123456
+		tgt_rpc bdev_crypto_create MallocForCryptoBdev CryptoMallocBdev $crypto_dirver 0123456789123456
 		expected_notifications+=(
 			bdev_register:MallocForCryptoBdev
 			bdev_register:CryptoMallocBdev
@@ -233,7 +233,7 @@ function create_bdev_subsystem_config() {
 		pmem_pool_file=$(mktemp /tmp/pool_file1.XXXXX)
 		rm -f $pmem_pool_file
 		tgt_rpc create_pmem_pool $pmem_pool_file 128 4096
-		tgt_rpc construct_pmem_bdev -n pmem1 $pmem_pool_file
+		tgt_rpc bdev_pmem_create -n pmem1 $pmem_pool_file
 		expected_notifications+=( bdev_register:pmem1 )
 	fi
 
@@ -252,18 +252,18 @@ function cleanup_bdev_subsystem_config() {
 	timing_enter $FUNCNAME
 
 	if [[ $SPDK_TEST_BLOCKDEV -eq 1 ]]; then
-		tgt_rpc destroy_lvol_bdev     lvs_test/clone0
-		tgt_rpc destroy_lvol_bdev     lvs_test/lvol0
-		tgt_rpc destroy_lvol_bdev     lvs_test/snapshot0
-		tgt_rpc destroy_lvol_store -l lvs_test
+		tgt_rpc bdev_lvol_delete     lvs_test/clone0
+		tgt_rpc bdev_lvol_delete     lvs_test/lvol0
+		tgt_rpc bdev_lvol_delete     lvs_test/snapshot0
+		tgt_rpc bdev_lvol_delete_lvstore -l lvs_test
 	fi
 
 	if [[ $(uname -s) = Linux ]]; then
 		rm -f /tmp/sample_aio
 	fi
 
-	if [[ $SPDK_TEST_PMDK -eq 1 && ! -z "$pmem_pool_file" && -f "$pmem_pool_file" ]]; then
-		tgt_rpc delete_pmem_bdev pmem1
+	if [[ $SPDK_TEST_PMDK -eq 1 && -n "$pmem_pool_file" && -f "$pmem_pool_file" ]]; then
+		tgt_rpc bdev_pmem_delete pmem1
 		tgt_rpc delete_pmem_pool $pmem_pool_file
 		rm -f $pmem_pool_file
 	fi
@@ -278,7 +278,7 @@ function cleanup_bdev_subsystem_config() {
 function create_vhost_subsystem_config() {
 	timing_enter $FUNCNAME
 
-	tgt_rpc construct_malloc_bdev 64 1024 --name MallocForVhost0
+	tgt_rpc bdev_malloc_create 64 1024 --name MallocForVhost0
 	tgt_rpc construct_split_vbdev MallocForVhost0 8
 
 	tgt_rpc construct_vhost_scsi_controller   VhostScsiCtrlr0
@@ -297,7 +297,7 @@ function create_vhost_subsystem_config() {
 
 function create_iscsi_subsystem_config() {
 	timing_enter $FUNCNAME
-	tgt_rpc construct_malloc_bdev 64 1024 --name MallocForIscsi0
+	tgt_rpc bdev_malloc_create 64 1024 --name MallocForIscsi0
 	tgt_rpc add_portal_group $PORTAL_TAG 127.0.0.1:$ISCSI_PORT
 	tgt_rpc add_initiator_group $INITIATOR_TAG $INITIATOR_NAME $NETMASK
 	tgt_rpc construct_target_node Target3 Target3_alias 'MallocForIscsi0:0' $PORTAL_TAG:$INITIATOR_TAG 64 -d
@@ -314,8 +314,8 @@ function create_nvmf_subsystem_config() {
 		return 1
 	fi
 
-	tgt_rpc construct_malloc_bdev 8 512 --name MallocForNvmf0
-	tgt_rpc construct_malloc_bdev 4 1024 --name MallocForNvmf1
+	tgt_rpc bdev_malloc_create 8 512 --name MallocForNvmf0
+	tgt_rpc bdev_malloc_create 4 1024 --name MallocForNvmf1
 
 	tgt_rpc nvmf_create_transport -t RDMA -u 8192 -c 0
 	tgt_rpc nvmf_subsystem_create       nqn.2016-06.io.spdk:cnode1 -a -s SPDK00000000000001
@@ -375,7 +375,7 @@ function json_config_test_init()
 		create_virtio_initiator_config
 	fi
 
-	tgt_rpc construct_malloc_bdev 8 512 --name MallocBdevForConfigChangeCheck
+	tgt_rpc bdev_malloc_create 8 512 --name MallocBdevForConfigChangeCheck
 
 	timing_exit $FUNCNAME
 }
@@ -384,7 +384,7 @@ function json_config_test_fini() {
 	timing_enter $FUNCNAME
 	local ret=0
 
-	if [[ ! -z "${app_pid[initiator]}" ]]; then
+	if [[ -n "${app_pid[initiator]}" ]]; then
 		if ! json_config_test_shutdown_app initiator; then
 			kill -9 ${app_pid[initiator]}
 			app_pid[initiator]=
@@ -392,7 +392,7 @@ function json_config_test_fini() {
 		fi
 	fi
 
-	if [[ ! -z "${app_pid[target]}" ]]; then
+	if [[ -n "${app_pid[target]}" ]]; then
 
 		# Remove any artifacts we created (files, lvol etc)
 		cleanup_bdev_subsystem_config
@@ -412,7 +412,7 @@ function json_config_test_fini() {
 }
 
 function json_config_clear() {
-	[[ ! -z "${#app_socket[$1]}" ]] # Check app type
+	[[ -n "${#app_socket[$1]}" ]] # Check app type
 	$rootdir/test/json_config/clear_config.py -s ${app_socket[$1]} clear_config
 
 	# Check if config is clean.

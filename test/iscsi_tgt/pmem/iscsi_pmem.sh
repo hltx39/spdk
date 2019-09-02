@@ -22,7 +22,7 @@ $ISCSI_APP -m $ISCSI_TEST_CORE_MASK --wait-for-rpc &
 pid=$!
 echo "Process pid: $pid"
 
-trap "iscsicleanup; killprocess $pid; rm -f /tmp/pool_file*; exit 1" SIGINT SIGTERM EXIT
+trap 'iscsicleanup; killprocess $pid; rm -f /tmp/pool_file*; exit 1' SIGINT SIGTERM EXIT
 
 waitforlisten $pid
 $rpc_py set_iscsi_options -o 30 -a 16
@@ -39,7 +39,7 @@ for i in $(seq 1 $TGT_NR); do
 	luns=""
 	for j in $(seq 1 $PMEM_PER_TGT); do
 		$rpc_py create_pmem_pool /tmp/pool_file${i}_${j} $PMEM_SIZE $PMEM_BLOCK_SIZE
-		bdevs_name="$($rpc_py construct_pmem_bdev -n pmem${i}_${j} /tmp/pool_file${i}_${j})"
+		bdevs_name="$($rpc_py bdev_pmem_create -n pmem${i}_${j} /tmp/pool_file${i}_${j})"
 		PMEM_BDEVS+="$bdevs_name "
 		luns+="$bdevs_name:$((j - 1)) "
 	done
@@ -60,7 +60,7 @@ timing_exit fio_test
 iscsicleanup
 
 for pmem in $PMEM_BDEVS; do
-	$rpc_py delete_pmem_bdev $pmem
+	$rpc_py bdev_pmem_delete $pmem
 done
 
 for i in $(seq 1 $TGT_NR); do

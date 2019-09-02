@@ -127,7 +127,7 @@ class UIRoot(UINode):
 
     @verbose
     def create_malloc_bdev(self, **kwargs):
-        response = rpc.bdev.construct_malloc_bdev(self.client, **kwargs)
+        response = rpc.bdev.bdev_malloc_create(self.client, **kwargs)
         return response
 
     @verbose
@@ -136,30 +136,30 @@ class UIRoot(UINode):
 
     @verbose
     def create_iscsi_bdev(self, **kwargs):
-        response = rpc.bdev.construct_iscsi_bdev(self.client, **kwargs)
+        response = rpc.bdev.bdev_iscsi_create(self.client, **kwargs)
         return response
 
     @verbose
-    def delete_iscsi_bdev(self, **kwargs):
-        rpc.bdev.delete_iscsi_bdev(self.client, **kwargs)
+    def bdev_iscsi_delete(self, **kwargs):
+        rpc.bdev.bdev_iscsi_delete(self.client, **kwargs)
 
     @verbose
-    def create_aio_bdev(self, **kwargs):
-        response = rpc.bdev.construct_aio_bdev(self.client, **kwargs)
+    def bdev_aio_create(self, **kwargs):
+        response = rpc.bdev.bdev_aio_create(self.client, **kwargs)
         return response
 
     @verbose
-    def delete_aio_bdev(self, **kwargs):
-        rpc.bdev.delete_aio_bdev(self.client, **kwargs)
+    def bdev_aio_delete(self, **kwargs):
+        rpc.bdev.bdev_aio_delete(self.client, **kwargs)
 
     @verbose
     def create_lvol_bdev(self, **kwargs):
-        response = rpc.lvol.construct_lvol_bdev(self.client, **kwargs)
+        response = rpc.lvol.bdev_lvol_create(self.client, **kwargs)
         return response
 
     @verbose
-    def destroy_lvol_bdev(self, **kwargs):
-        response = rpc.lvol.destroy_lvol_bdev(self.client, **kwargs)
+    def bdev_lvol_delete(self, **kwargs):
+        response = rpc.lvol.bdev_lvol_delete(self.client, **kwargs)
         return response
 
     @verbose
@@ -172,38 +172,38 @@ class UIRoot(UINode):
         rpc.bdev.delete_nvme_controller(self.client, **kwargs)
 
     @verbose
-    def create_null_bdev(self, **kwargs):
-        response = rpc.bdev.construct_null_bdev(self.client, **kwargs)
+    def bdev_null_create(self, **kwargs):
+        response = rpc.bdev.bdev_null_create(self.client, **kwargs)
         return response
 
     @verbose
-    def delete_null_bdev(self, **kwargs):
-        rpc.bdev.delete_null_bdev(self.client, **kwargs)
+    def bdev_null_delete(self, **kwargs):
+        rpc.bdev.bdev_null_delete(self.client, **kwargs)
 
     @verbose
     def create_error_bdev(self, **kwargs):
-        response = rpc.bdev.construct_error_bdev(self.client, **kwargs)
+        response = rpc.bdev.bdev_error_create(self.client, **kwargs)
 
     @verbose
-    def delete_error_bdev(self, **kwargs):
-        rpc.bdev.delete_error_bdev(self.client, **kwargs)
+    def bdev_error_delete(self, **kwargs):
+        rpc.bdev.bdev_error_delete(self.client, **kwargs)
 
     @verbose
     @is_method_available
-    def get_lvol_stores(self):
+    def bdev_lvol_get_lvstores(self):
         if self.is_init:
-            self.current_lvol_stores = rpc.lvol.get_lvol_stores(self.client)
+            self.current_lvol_stores = rpc.lvol.bdev_lvol_get_lvstores(self.client)
             for lvs in self.current_lvol_stores:
                 yield LvolStore(lvs)
 
     @verbose
-    def create_lvol_store(self, **kwargs):
-        response = rpc.lvol.construct_lvol_store(self.client, **kwargs)
+    def bdev_lvol_create_lvstore(self, **kwargs):
+        response = rpc.lvol.bdev_lvol_create_lvstore(self.client, **kwargs)
         return response
 
     @verbose
-    def delete_lvol_store(self, **kwargs):
-        rpc.lvol.destroy_lvol_store(self.client, **kwargs)
+    def bdev_lvol_delete_lvstore(self, **kwargs):
+        rpc.lvol.bdev_lvol_delete_lvstore(self.client, **kwargs)
 
     @verbose
     def create_pmem_pool(self, **kwargs):
@@ -220,13 +220,13 @@ class UIRoot(UINode):
         return response
 
     @verbose
-    def create_pmem_bdev(self, **kwargs):
-        response = rpc.bdev.construct_pmem_bdev(self.client, **kwargs)
+    def bdev_pmem_create(self, **kwargs):
+        response = rpc.bdev.bdev_pmem_create(self.client, **kwargs)
         return response
 
     @verbose
-    def delete_pmem_bdev(self, **kwargs):
-        response = rpc.bdev.delete_pmem_bdev(self.client, **kwargs)
+    def bdev_pmem_delete(self, **kwargs):
+        response = rpc.bdev.bdev_pmem_delete(self.client, **kwargs)
         return response
 
     @verbose

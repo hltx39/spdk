@@ -9,7 +9,7 @@ rpc_py=$rootdir/scripts/rpc.py
 
 pci_devs=$($rootdir/app/spdk_lspci/spdk_lspci | grep "NVMe disk behind VMD" | awk '{print $1}')
 
-if [ -z $pci_devs]; then
+if [ -z $pci_devs ]; then
         echo "Couldn't find any NVMe device behind a VMD."
         exit 1
 fi
@@ -43,7 +43,7 @@ if [ -d /usr/src/fio ]; then
 fi
 
 $rootdir/test/app/bdev_svc/bdev_svc --wait-for-rpc & svcpid=$!
-trap "killprocess $svcpid; exit 1" SIGINT SIGTERM EXIT
+trap 'killprocess $svcpid; exit 1' SIGINT SIGTERM EXIT
 # Wait until bdev_svc starts
 waitforlisten $svcpid
 

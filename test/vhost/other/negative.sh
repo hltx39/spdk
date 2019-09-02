@@ -7,7 +7,7 @@ source $rootdir/test/vhost/common.sh
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Shortcut script for running vhost app."
 	echo "Usage: $(basename $1) [-x] [-h|--help] [--clean-build]"
 	echo "-h, --help           print help and exit"
@@ -69,10 +69,11 @@ if [[ $RUN_NIGHTLY -eq 1 ]]; then
 	notice ""
 	notice "running SPDK"
 	notice ""
-	vhost_run --json-path=$testdir
+	vhost_run 0
+	vhost_load_config 0 $testdir/conf.json
 	notice ""
 
-	rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+	rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 	# General commands
 	notice "Trying to remove nonexistent controller"
@@ -141,7 +142,7 @@ if [[ $RUN_NIGHTLY -eq 1 ]]; then
 
 	notice "Testing done -> shutting down"
 	notice "killing vhost app"
-	vhost_kill
+	vhost_kill 0
 
 	notice "EXIT DONE"
 	notice "==============="

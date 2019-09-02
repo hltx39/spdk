@@ -21,12 +21,12 @@ function migration_tc1_configure_vhost()
 	target_vm=1
 	incoming_vm_ctrlr=naa.Malloc0.$incoming_vm
 	target_vm_ctrlr=naa.Malloc0.$target_vm
-	rpc="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+	rpc="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 	trap 'migration_tc1_error_handler; error_exit "${FUNCNAME}" "${LINENO}"' INT ERR EXIT
 
 	# Construct shared Malloc Bdev
-	$rpc construct_malloc_bdev -b Malloc0 128 4096
+	$rpc bdev_malloc_create -b Malloc0 128 4096
 
 	# And two controllers - one for each VM. Both are using the same Malloc Bdev as LUN 0
 	$rpc construct_vhost_scsi_controller $incoming_vm_ctrlr
@@ -57,7 +57,7 @@ function migration_tc1()
 	local job_file="$testdir/migration-tc1.job"
 
 	# Run vhost
-	vhost_run
+	vhost_run 0
 	migration_tc1_configure_vhost
 
 	notice "Setting up VMs"
@@ -115,7 +115,7 @@ function migration_tc1()
 	migration_tc1_clean_vhost_config
 
 	notice "killing vhost app"
-	vhost_kill
+	vhost_kill 0
 
 	notice "Migration TC1 SUCCESS"
 }

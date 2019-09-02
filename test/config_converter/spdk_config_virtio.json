@@ -30,14 +30,14 @@
             "nvme_ioq_poll_period_us": 0,
             "action_on_timeout": "none"
           },
-          "method": "set_bdev_nvme_options"
+          "method": "bdev_nvme_set_options"
         },
         {
           "params": {
             "enable": false,
             "period_us": 100000
           },
-          "method": "set_bdev_nvme_hotplug"
+          "method": "bdev_nvme_set_hotplug"
         },
         {
           "params": {

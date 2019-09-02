@@ -13,7 +13,7 @@ function usage()
 		options="[config|reset|help]"
 	fi
 
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Helper script for allocating hugepages and binding NVMe, I/OAT, VMD and Virtio devices"
 	echo "to a generic VFIO kernel driver. If VFIO is not available on the system, this script"
 	echo "will fall back to UIO. NVMe and Virtio devices with active mountpoints will be ignored."
@@ -307,7 +307,8 @@ function cleanup_linux {
 	done
 	shopt -u extglob nullglob
 
-	files_to_clean+="$(ls -1 /dev/shm/* | grep -E '(spdk_tgt|iscsi|vhost|nvmf|rocksdb|bdevio|bdevperf)_trace|spdk_iscsi_conns' || true) "
+	files_to_clean+="$(ls -1 /dev/shm/* | \
+	grep -E '(spdk_tgt|iscsi|vhost|nvmf|rocksdb|bdevio|bdevperf|vhost_fuzz|nvme_fuzz)_trace|spdk_iscsi_conns' || true) "
 	files_to_clean="$(readlink -e assert_not_empty $files_to_clean || true)"
 	if [[ -z "$files_to_clean" ]]; then
 		echo "Clean"
@@ -400,6 +401,13 @@ function configure_linux {
 				echo "if run as current user."
 			fi
 		fi
+	fi
+
+	if [ ! -f /dev/cpu/0/msr ]; then
+		# Some distros build msr as a module.  Make sure it's loaded to ensure
+		#  DPDK can easily figure out the TSC rate rather than relying on 100ms
+		#  sleeps.
+		modprobe msr || true
 	fi
 }
 

@@ -51,6 +51,8 @@ SPDK_LOG_REGISTER_COMPONENT("nvmf", SPDK_LOG_NVMF)
 
 #define SPDK_NVMF_DEFAULT_MAX_SUBSYSTEMS 1024
 
+static TAILQ_HEAD(, spdk_nvmf_tgt) g_nvmf_tgts = TAILQ_HEAD_INITIALIZER(g_nvmf_tgts);
+
 typedef void (*nvmf_qpair_disconnect_cpl)(void *ctx, int status);
 static void spdk_nvmf_tgt_destroy_poll_group(void *io_device, void *ctx_buf);
 
@@ -217,19 +219,33 @@ spdk_nvmf_tgt_destroy_poll_group_qpairs(struct spdk_nvmf_poll_group *group)
 }
 
 struct spdk_nvmf_tgt *
-spdk_nvmf_tgt_create(uint32_t max_subsystems)
+spdk_nvmf_tgt_create(struct spdk_nvmf_target_opts *opts)
 {
-	struct spdk_nvmf_tgt *tgt;
+	struct spdk_nvmf_tgt *tgt, *tmp_tgt;
+
+	if (strnlen(opts->name, NVMF_TGT_NAME_MAX_LENGTH) == NVMF_TGT_NAME_MAX_LENGTH) {
+		SPDK_ERRLOG("Provided target name exceeds the max length of %u.\n", NVMF_TGT_NAME_MAX_LENGTH);
+		return NULL;
+	}
+
+	TAILQ_FOREACH(tmp_tgt, &g_nvmf_tgts, link) {
+		if (!strncmp(opts->name, tmp_tgt->name, strlen(tmp_tgt->name))) {
+			SPDK_ERRLOG("Provided target name must be unique.\n");
+			return NULL;
+		}
+	}
 
 	tgt = calloc(1, sizeof(*tgt));
 	if (!tgt) {
 		return NULL;
 	}
 
-	if (!max_subsystems) {
+	snprintf(tgt->name, NVMF_TGT_NAME_MAX_LENGTH, "%s", opts->name);
+
+	if (!opts || !opts->max_subsystems) {
 		tgt->max_subsystems = SPDK_NVMF_DEFAULT_MAX_SUBSYSTEMS;
 	} else {
-		tgt->max_subsystems = max_subsystems;
+		tgt->max_subsystems = opts->max_subsystems;
 	}
 
 	tgt->discovery_genctr = 0;
@@ -243,11 +259,13 @@ spdk_nvmf_tgt_create(uint32_t max_subsystems)
 		return NULL;
 	}
 
+	TAILQ_INSERT_HEAD(&g_nvmf_tgts, tgt, link);
+
 	spdk_io_device_register(tgt,
 				spdk_nvmf_tgt_create_poll_group,
 				spdk_nvmf_tgt_destroy_poll_group,
 				sizeof(struct spdk_nvmf_poll_group),
-				"nvmf_tgt");
+				tgt->name);
 
 	return tgt;
 }
@@ -297,7 +315,37 @@ spdk_nvmf_tgt_destroy(struct spdk_nvmf_tgt *tgt,
 	tgt->destroy_cb_fn = cb_fn;
 	tgt->destroy_cb_arg = cb_arg;
 
+	TAILQ_REMOVE(&g_nvmf_tgts, tgt, link);
+
 	spdk_io_device_unregister(tgt, spdk_nvmf_tgt_destroy_cb);
+}
+
+struct spdk_nvmf_tgt *
+spdk_nvmf_get_tgt(const char *name)
+{
+	struct spdk_nvmf_tgt *tgt;
+	uint32_t num_targets = 0;
+
+	TAILQ_FOREACH(tgt, &g_nvmf_tgts, link) {
+		if (name) {
+			if (!strncmp(tgt->name, name, strlen(tgt->name))) {
+				return tgt;
+			}
+		}
+		num_targets++;
+	}
+
+	/*
+	 * special case. If there is only one target and
+	 * no name was specified, return the only available
+	 * target. If there is more than one target, name must
+	 * be specified.
+	 */
+	if (!name && num_targets == 1) {
+		return TAILQ_FIRST(&g_nvmf_tgts);
+	}
+
+	return NULL;
 }
 
 static void
@@ -872,6 +920,8 @@ poll_group_update_subsystem(struct spdk_nvmf_poll_group *group,
 	struct spdk_nvmf_registrant *reg, *tmp;
 	struct spdk_io_channel *ch;
 	struct spdk_nvmf_subsystem_pg_ns_info *ns_info;
+	struct spdk_nvmf_ctrlr *ctrlr;
+	bool ns_changed;
 
 	/* Make sure our poll group has memory for this subsystem allocated */
 	if (subsystem->id >= group->num_sgroups) {
@@ -883,6 +933,8 @@ poll_group_update_subsystem(struct spdk_nvmf_poll_group *group,
 	/* Make sure the array of namespace information is the correct size */
 	new_num_ns = subsystem->max_nsid;
 	old_num_ns = sgroup->num_ns;
+
+	ns_changed = false;
 
 	if (old_num_ns == 0) {
 		if (new_num_ns > 0) {
@@ -945,10 +997,12 @@ poll_group_update_subsystem(struct spdk_nvmf_poll_group *group,
 			/* Both NULL. Leave empty */
 		} else if (ns == NULL && ch != NULL) {
 			/* There was a channel here, but the namespace is gone. */
+			ns_changed = true;
 			spdk_put_io_channel(ch);
 			ns_info->channel = NULL;
 		} else if (ns != NULL && ch == NULL) {
 			/* A namespace appeared but there is no channel yet */
+			ns_changed = true;
 			ch = spdk_bdev_get_io_channel(ns->desc);
 			if (ch == NULL) {
 				SPDK_ERRLOG("Could not allocate I/O channel.\n");
@@ -957,6 +1011,7 @@ poll_group_update_subsystem(struct spdk_nvmf_poll_group *group,
 			ns_info->channel = ch;
 		} else if (spdk_uuid_compare(&ns_info->uuid, spdk_bdev_get_uuid(ns->bdev)) != 0) {
 			/* A namespace was here before, but was replaced by a new one. */
+			ns_changed = true;
 			spdk_put_io_channel(ns_info->channel);
 			memset(ns_info, 0, sizeof(*ns_info));
 
@@ -986,6 +1041,14 @@ poll_group_update_subsystem(struct spdk_nvmf_poll_group *group,
 					return -EINVAL;
 				}
 				ns_info->reg_hostid[j++] = reg->hostid;
+			}
+		}
+	}
+
+	if (ns_changed) {
+		TAILQ_FOREACH(ctrlr, &subsystem->ctrlrs, link) {
+			if (ctrlr->admin_qpair->group == group) {
+				spdk_nvmf_ctrlr_async_event_ns_notice(ctrlr);
 			}
 		}
 	}

@@ -18,7 +18,7 @@ x=""
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Shortcut script for doing automated test"
 	echo "Usage: $(basename $1) [OPTIONS]"
 	echo
@@ -81,7 +81,8 @@ if [[ $test_type =~ "spdk_vhost" ]]; then
 	notice ""
 	notice "running SPDK"
 	notice ""
-	vhost_run --json-path=$testdir
+	vhost_run 0
+	vhost_load_config 0 $testdir/conf.json
 	notice ""
 fi
 
@@ -90,7 +91,7 @@ notice ""
 notice "Setting up VM"
 notice ""
 
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 for vm_conf in ${vms[@]}; do
 	IFS=',' read -ra conf <<< "$vm_conf"
@@ -115,9 +116,9 @@ for vm_conf in ${vms[@]}; do
 			for disk in "${disks[@]}"; do
 				notice "Create a lvol store on RaidBdev2 and then a lvol bdev on the lvol store"
 				if [[ $disk == "RaidBdev2" ]]; then
-					ls_guid=$($rpc_py construct_lvol_store RaidBdev2 lvs_0 -c 4194304)
+					ls_guid=$($rpc_py bdev_lvol_create_lvstore RaidBdev2 lvs_0 -c 4194304)
 					free_mb=$(get_lvs_free_mb "$ls_guid")
-					based_disk=$($rpc_py construct_lvol_bdev -u $ls_guid lbd_0 $free_mb)
+					based_disk=$($rpc_py bdev_lvol_create -u $ls_guid lbd_0 $free_mb)
 				else
 					based_disk="$disk"
 				fi
@@ -244,8 +245,8 @@ if ! $no_shutdown; then
 					$rpc_py remove_vhost_controller naa.$disk.${conf[0]}
 					if [[ $disk == "RaidBdev2" ]]; then
 						notice "Removing lvol bdev and lvol store"
-						$rpc_py destroy_lvol_bdev lvs_0/lbd_0
-						$rpc_py destroy_lvol_store -l lvs_0
+						$rpc_py bdev_lvol_delete lvs_0/lbd_0
+						$rpc_py bdev_lvol_delete_lvstore -l lvs_0
 					fi
 				done
 			done <<< "${conf[2]}"
@@ -253,7 +254,7 @@ if ! $no_shutdown; then
 	fi
 	notice "Testing done -> shutting down"
 	notice "killing vhost app"
-	vhost_kill
+	vhost_kill 0
 
 	notice "EXIT DONE"
 	notice "==============="

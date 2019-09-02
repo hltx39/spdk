@@ -48,11 +48,6 @@ extern "C" {
 #include "spdk/nvme_spec.h"
 #include "spdk/nvmf_spec.h"
 
-#define SPDK_NVME_DEFAULT_RETRY_COUNT	(4)
-extern int32_t		spdk_nvme_retry_count;
-
-
-
 /**
  * Opaque handle to a controller. Returned by spdk_nvme_probe()'s attach_cb.
  */
@@ -77,6 +72,11 @@ struct spdk_nvme_ctrlr_opts {
 	bool use_cmb_sqs;
 
 	/**
+	 * Don't initiate shutdown processing
+	 */
+	bool no_shn_notification;
+
+	/**
 	 * Type of arbitration mechanism
 	 */
 	enum spdk_nvme_cc_ams arb_mechanism;
@@ -94,7 +94,7 @@ struct spdk_nvme_ctrlr_opts {
 	/**
 	 * Specify the retry number when there is issue with the transport
 	 */
-	int transport_retry_count;
+	uint8_t transport_retry_count;
 
 	/**
 	 * The queue depth of each NVMe I/O queue.

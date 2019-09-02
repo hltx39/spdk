@@ -80,10 +80,9 @@ struct spdk_iscsi_conn {
 	 */
 	struct spdk_iscsi_portal	*portal;
 	int				pg_tag;
-	char				*portal_host;
-	char				*portal_port;
-	struct spdk_cpuset		*portal_cpumask;
-	uint32_t			lcore;
+	char				portal_host[MAX_PORTAL_ADDR + 1];
+	char				portal_port[MAX_PORTAL_ADDR + 1];
+	struct spdk_iscsi_poll_group	*pg;
 	struct spdk_sock		*sock;
 	struct spdk_iscsi_sess		*sess;
 
@@ -190,4 +189,5 @@ void spdk_iscsi_conn_write_pdu(struct spdk_iscsi_conn *conn, struct spdk_iscsi_p
 
 void spdk_iscsi_conn_free_pdu(struct spdk_iscsi_conn *conn, struct spdk_iscsi_pdu *pdu);
 
+void spdk_iscsi_conn_info_json(struct spdk_json_write_ctx *w, struct spdk_iscsi_conn *conn);
 #endif /* SPDK_ISCSI_CONN_H */

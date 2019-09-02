@@ -4,6 +4,7 @@
 TEST_DIR=$(readlink -f $rootdir/..)
 VM_DIR=$VHOST_DIR/vms
 TARGET_DIR=$VHOST_DIR/vhost
+VM_PASSWORD="root"
 
 #TODO: Move vhost_vm_image.qcow2 into VHOST_DIR on test systems.
 VM_IMAGE=$HOME/vhost_vm_image.qcow2
@@ -96,57 +97,34 @@ function notice()
 
 function get_vhost_dir()
 {
-	if [[ ! -z "$1" ]]; then
-		assert_number "$1"
-		local vhost_num=$1
-	else
-		local vhost_num=0
+	local vhost_name="$1"
+
+	if [[ -z "$vhost_name" ]]; then
+		error "vhost name must be provided to get_vhost_dir"
+		return 1
 	fi
 
-	echo "$TARGET_DIR/${vhost_num}"
-}
-
-function vhost_list_all()
-{
-	shopt -s nullglob
-	local vhost_list="$(echo $TARGET_DIR/[0-9]*)"
-	shopt -u nullglob
-
-	if [[ ! -z "$vhost_list" ]]; then
-		vhost_list="$(basename --multiple $vhost_list)"
-		echo "${vhost_list//vhost/}"
-	fi
+	echo "$TARGET_DIR/${vhost_name}"
 }
 
 function vhost_run()
 {
-	local param
-	local vhost_num=0
-	local memory=1024
+	local vhost_name="$1"
 
-	for param in "$@"; do
-		case $param in
-			--vhost-num=*)
-				vhost_num="${param#*=}"
-				assert_number "$vhost_num"
-				;;
-			--json-path=*) local vhost_json_path="${param#*=}" ;;
-			--memory=*) local memory=${param#*=} ;;
-			--no-pci*) local no_pci="-u" ;;
-			*)
-				error "Invalid parameter '$param'"
-				return 1
-				;;
-		esac
-	done
+	shift
 
-	local vhost_dir="$(get_vhost_dir $vhost_num)"
+	if [[ -z "$vhost_name" ]]; then
+		error "vhost name must be provided to vhost_run"
+		return 1
+	fi
+
+	local vhost_dir="$(get_vhost_dir $vhost_name)"
 	local vhost_app="$rootdir/app/vhost/vhost"
 	local vhost_log_file="$vhost_dir/vhost.log"
 	local vhost_pid_file="$vhost_dir/vhost.pid"
 	local vhost_socket="$vhost_dir/usvhost"
 	notice "starting vhost app in background"
-	[[ -r "$vhost_pid_file" ]] && vhost_kill $vhost_num
+	[[ -r "$vhost_pid_file" ]] && vhost_kill 0 $vhost_name
 	[[ -d $vhost_dir ]] && rm -f $vhost_dir/*
 	mkdir -p $vhost_dir
 
@@ -155,18 +133,7 @@ function vhost_run()
 		return 1
 	fi
 
-	local reactor_mask="vhost_${vhost_num}_reactor_mask"
-	reactor_mask="${!reactor_mask}"
-
-	local master_core="vhost_${vhost_num}_master_core"
-	master_core="${!master_core}"
-
-	if [[ -z "$reactor_mask" ]] || [[ -z "$master_core" ]]; then
-		error "Parameters vhost_${vhost_num}_reactor_mask or vhost_${vhost_num}_master_core not found in autotest.config file"
-		return 1
-	fi
-
-	local cmd="$vhost_app -m $reactor_mask -p $master_core -s $memory -r $vhost_dir/rpc.sock $no_pci"
+	local cmd="$vhost_app -r $vhost_dir/rpc.sock $2"
 
 	notice "Loging to:   $vhost_log_file"
 	notice "Socket:      $vhost_socket"
@@ -185,24 +152,31 @@ function vhost_run()
 		 -s $vhost_dir/rpc.sock load_subsystem_config
 	fi
 
-	if [[ -n "$vhost_json_path" ]]; then
-		$rootdir/scripts/rpc.py -s $vhost_dir/rpc.sock load_config < "$vhost_json_path/conf.json"
-	fi
-
 	notice "vhost started - pid=$vhost_pid"
 	timing_exit vhost_start
+}
+
+function vhost_load_config()
+{
+	local vhost_num="$1"
+	local vhost_json_conf="$2"
+	local vhost_dir="$(get_vhost_dir $vhost_num)"
+
+	$rootdir/scripts/rpc.py -s $vhost_dir/rpc.sock load_config < "$vhost_json_conf"
 }
 
 function vhost_kill()
 {
 	local rc=0
-	local vhost_num=0
-	if [[ ! -z "$1" ]]; then
-		vhost_num=$1
-		assert_number "$vhost_num"
+	local vhost_name="$1"
+
+	if [[ -z "$vhost_name" ]]; then
+		error "Must provide vhost name to vhost_kill"
+		return 0
 	fi
 
-	local vhost_pid_file="$(get_vhost_dir $vhost_num)/vhost.pid"
+	local vhost_dir="$(get_vhost_dir $vhost_name)"
+	local vhost_pid_file="$vhost_dir/vhost.pid"
 
 	if [[ ! -r $vhost_pid_file ]]; then
 		warning "no vhost pid file found"
@@ -213,19 +187,19 @@ function vhost_kill()
 	local vhost_pid="$(cat $vhost_pid_file)"
 	notice "killing vhost (PID $vhost_pid) app"
 
-	if /bin/kill -INT $vhost_pid >/dev/null; then
+	if kill -INT $vhost_pid > /dev/null; then
 		notice "sent SIGINT to vhost app - waiting 60 seconds to exit"
 		for ((i=0; i<60; i++)); do
-			if /bin/kill -0 $vhost_pid; then
+			if kill -0 $vhost_pid; then
 				echo "."
 				sleep 1
 			else
 				break
 			fi
 		done
-		if /bin/kill -0 $vhost_pid; then
+		if kill -0 $vhost_pid; then
 			error "ERROR: vhost was NOT killed - sending SIGABRT"
-			/bin/kill -ABRT $vhost_pid
+			kill -ABRT $vhost_pid
 			rm $vhost_pid_file
 			rc=1
 		else
@@ -233,11 +207,11 @@ function vhost_kill()
 				echo "."
 			done
 		fi
-	elif /bin/kill -0 $vhost_pid; then
+	elif kill -0 $vhost_pid; then
 		error "vhost NOT killed - you need to kill it manually"
 		rc=1
 	else
-		notice "vhost was no running"
+		notice "vhost was not running"
 	fi
 
 	timing_exit vhost_kill
@@ -245,19 +219,22 @@ function vhost_kill()
 		rm $vhost_pid_file
 	fi
 
+	rm -rf "$vhost_dir"
+
 	return $rc
 }
 
 function vhost_rpc
 {
-	local vhost_num=0
-	if [[ ! -z "$1" ]]; then
-		vhost_num=$1
-		assert_number "$vhost_num"
+	local vhost_name="$1"
+
+	if [[ -z "$vhost_name" ]]; then
+		error "vhost name must be provided to vhost_rpc"
+		return 1
 	fi
 	shift
 
-	$rootdir/scripts/rpc.py -s $(get_vhost_dir $vhost_num)/rpc.sock $@
+	$rootdir/scripts/rpc.py -s $(get_vhost_dir $vhost_name)/rpc.sock $@
 }
 
 ###
@@ -332,7 +309,7 @@ function vm_exec()
 	local vm_num="$1"
 	shift
 
-	sshpass -p root ssh \
+	sshpass -p "$VM_PASSWORD" ssh \
 		-o UserKnownHostsFile=/dev/null \
 		-o StrictHostKeyChecking=no \
 		-o User=root \
@@ -350,7 +327,7 @@ function vm_scp()
 	local vm_num="$1"
 	shift
 
-	sshpass -p root scp \
+	sshpass -p "$VM_PASSWORD" scp \
 		-o UserKnownHostsFile=/dev/null \
 		-o StrictHostKeyChecking=no \
 		-o User=root \
@@ -465,7 +442,7 @@ function vm_kill()
 function vm_list_all()
 {
 	local vms="$(shopt -s nullglob; echo $VM_DIR/[0-9]*)"
-	if [[ ! -z "$vms" ]]; then
+	if [[ -n "$vms" ]]; then
 		basename --multiple $vms
 	fi
 }
@@ -542,7 +519,7 @@ function vm_setup()
 	local force_vm=""
 	local guest_memory=1024
 	local queue_number=""
-	local vhost_dir="$(get_vhost_dir)"
+	local vhost_dir="$(get_vhost_dir 0)"
 	while getopts ':-:' optchar; do
 		case "$optchar" in
 			-)
@@ -559,7 +536,7 @@ function vm_setup()
 				queue_num=*) local queue_number=${OPTARG#*=} ;;
 				incoming=*) local vm_incoming="${OPTARG#*=}" ;;
 				migrate-to=*) local vm_migrate_to="${OPTARG#*=}" ;;
-				vhost-num=*) local vhost_dir="$(get_vhost_dir ${OPTARG#*=})" ;;
+				vhost-name=*) local vhost_dir="$(get_vhost_dir ${OPTARG#*=})" ;;
 				spdk-boot=*) local boot_from="${OPTARG#*=}" ;;
 				*)
 					error "unknown argument $OPTARG"
@@ -574,7 +551,7 @@ function vm_setup()
 	done
 
 	# Find next directory we can use
-	if [[ ! -z $force_vm ]]; then
+	if [[ -n $force_vm ]]; then
 		vm_num=$force_vm
 
 		vm_num_is_valid $vm_num || return 1
@@ -598,18 +575,18 @@ function vm_setup()
 		return 1
 	fi
 
-	if [[ ! -z "$vm_migrate_to" && ! -z "$vm_incoming" ]]; then
+	if [[ -n "$vm_migrate_to" && -n "$vm_incoming" ]]; then
 		error "'--incoming' and '--migrate-to' cannot be used together"
 		return 1
-	elif [[ ! -z "$vm_incoming" ]]; then
-		if [[ ! -z "$os_mode" || ! -z "$os_img" ]]; then
+	elif [[ -n "$vm_incoming" ]]; then
+		if [[ -n "$os_mode" || -n "$os_img" ]]; then
 			error "'--incoming' can't be used together with '--os' nor '--os-mode'"
 			return 1
 		fi
 
 		os_mode="original"
 		os="$VM_DIR/$vm_incoming/os.qcow2"
-	elif [[ ! -z "$vm_migrate_to" ]]; then
+	elif [[ -n "$vm_migrate_to" ]]; then
 		[[ "$os_mode" != "backing" ]] && warning "Using 'backing' mode for OS since '--migrate-to' is used"
 		os_mode=backing
 	fi
@@ -693,7 +670,7 @@ function vm_setup()
 	cmd+="-m $guest_memory --enable-kvm -cpu host -smp $cpu_num -vga std -vnc :$vnc_socket -daemonize ${eol}"
 	cmd+="-object memory-backend-file,id=mem,size=${guest_memory}M,mem-path=/dev/hugepages,share=on,prealloc=yes,host-nodes=$node_num,policy=bind ${eol}"
 	[[ $os_mode == snapshot ]] && cmd+="-snapshot ${eol}"
-	[[ ! -z "$vm_incoming" ]] && cmd+=" -incoming tcp:0:$migration_port ${eol}"
+	[[ -n "$vm_incoming" ]] && cmd+=" -incoming tcp:0:$migration_port ${eol}"
 	cmd+="-monitor telnet:127.0.0.1:$monitor_port,server,nowait ${eol}"
 	cmd+="-numa node,memdev=mem ${eol}"
 	cmd+="-pidfile $qemu_pid_file ${eol}"
@@ -707,7 +684,7 @@ function vm_setup()
 		cmd+="-device ide-hd,drive=os_disk,bootindex=0 ${eol}"
 	fi
 
-	if ( [[ $disks == '' ]] && [[ $disk_type_g == virtio* ]] ); then
+	if [[ $disks == '' ]] && [[ $disk_type_g == virtio* ]]; then
 		disks=1
 	fi
 
@@ -724,7 +701,7 @@ function vm_setup()
 				local raw_name="RAWSCSI"
 				local raw_disk=$vm_dir/test.img
 
-				if [[ ! -z $disk ]]; then
+				if [[ -n $disk ]]; then
 					[[ ! -b $disk ]] && touch $disk
 					local raw_disk=$(readlink -f $disk)
 				fi
@@ -791,7 +768,7 @@ function vm_setup()
 		return 1
 	fi
 
-	[[ ! -z $qemu_args ]] && cmd+=" $qemu_args ${eol}"
+	[[ -n $qemu_args ]] && cmd+=" $qemu_args ${eol}"
 	# remove last $eol
 	cmd="${cmd%\\\\\\n  }"
 
@@ -1073,7 +1050,7 @@ function run_fio()
 		esac
 	done
 
-	if [[ ! -z "$fio_bin" && ! -r "$fio_bin" ]]; then
+	if [[ -n "$fio_bin" && ! -r "$fio_bin" ]]; then
 		error "FIO binary '$fio_bin' does not exist"
 		return 1
 	fi
@@ -1094,7 +1071,7 @@ function run_fio()
 
 		vm_exec $vm_num cat /root/$job_fname
 		if ! $run_server_mode; then
-			if [[ ! -z "$fio_bin" ]]; then
+			if [[ -n "$fio_bin" ]]; then
 				cat $fio_bin | vm_exec $vm_num 'cat > /root/fio; chmod +x /root/fio'
 			fi
 
@@ -1110,7 +1087,7 @@ function run_fio()
 	fi
 
 	$rootdir/test/vhost/common/run_fio.py --job-file=/root/$job_fname \
-		$([[ ! -z "$fio_bin" ]] && echo "--fio-bin=$fio_bin") \
+		$([[ -n "$fio_bin" ]] && echo "--fio-bin=$fio_bin") \
 		--out=$out $json ${fio_disks%,}
 }
 
@@ -1118,7 +1095,7 @@ function run_fio()
 #
 function at_app_exit()
 {
-	local vhost_num
+	local vhost_name
 
 	notice "APP EXITING"
 	notice "killing all VMs"
@@ -1126,8 +1103,8 @@ function at_app_exit()
 	# Kill vhost application
 	notice "killing vhost app"
 
-	for vhost_num in $(vhost_list_all); do
-		vhost_kill $vhost_num
+	for vhost_name in $(ls $TARGET_DIR); do
+		vhost_kill $vhost_name
 	done
 
 	notice "EXIT DONE"

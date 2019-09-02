@@ -54,6 +54,8 @@
 #define BLOBFS_DEFAULT_CACHE_SIZE (4ULL * 1024 * 1024 * 1024)
 #define SPDK_BLOBFS_DEFAULT_OPTS_CLUSTER_SZ (1024 * 1024)
 
+#define SPDK_BLOBFS_SIGNATURE	"BLOBFS"
+
 static uint64_t g_fs_cache_size = BLOBFS_DEFAULT_CACHE_SIZE;
 static struct spdk_mempool *g_cache_pool;
 static TAILQ_HEAD(, spdk_file) g_caches;
@@ -593,7 +595,7 @@ spdk_fs_init(struct spdk_bs_dev *dev, struct spdk_blobfs_opts *opt,
 	args->fs = fs;
 
 	spdk_bs_opts_init(&opts);
-	snprintf(opts.bstype.bstype, sizeof(opts.bstype.bstype), "BLOBFS");
+	snprintf(opts.bstype.bstype, sizeof(opts.bstype.bstype), SPDK_BLOBFS_SIGNATURE);
 	if (opt) {
 		opts.cluster_sz = opt->cluster_sz;
 	}
@@ -753,13 +755,14 @@ load_cb(void *ctx, struct spdk_blob_store *bs, int bserrno)
 	struct spdk_fs_cb_args *args = &req->args;
 	struct spdk_filesystem *fs = args->fs;
 	struct spdk_bs_type bstype;
-	static const struct spdk_bs_type blobfs_type = {"BLOBFS"};
+	static const struct spdk_bs_type blobfs_type = {SPDK_BLOBFS_SIGNATURE};
 	static const struct spdk_bs_type zeros;
 
 	if (bserrno != 0) {
 		args->fn.fs_op_with_handle(args->arg, NULL, bserrno);
 		free_fs_request(req);
-		free(fs);
+		spdk_fs_free_io_channels(fs);
+		spdk_fs_io_device_unregister(fs);
 		return;
 	}
 
@@ -769,11 +772,12 @@ load_cb(void *ctx, struct spdk_blob_store *bs, int bserrno)
 		SPDK_DEBUGLOG(SPDK_LOG_BLOB, "assigning bstype\n");
 		spdk_bs_set_bstype(bs, blobfs_type);
 	} else if (memcmp(&bstype, &blobfs_type, sizeof(bstype))) {
-		SPDK_DEBUGLOG(SPDK_LOG_BLOB, "not blobfs\n");
+		SPDK_ERRLOG("not blobfs\n");
 		SPDK_LOGDUMP(SPDK_LOG_BLOB, "bstype", &bstype, sizeof(bstype));
-		args->fn.fs_op_with_handle(args->arg, NULL, bserrno);
+		args->fn.fs_op_with_handle(args->arg, NULL, -EINVAL);
 		free_fs_request(req);
-		free(fs);
+		spdk_fs_free_io_channels(fs);
+		spdk_fs_io_device_unregister(fs);
 		return;
 	}
 
@@ -1092,8 +1096,7 @@ __fs_create_file_done(void *arg, int fserrno)
 	struct spdk_fs_request *req = arg;
 	struct spdk_fs_cb_args *args = &req->args;
 
-	args->rc = fserrno;
-	sem_post(args->sem);
+	__wake_caller(args, fserrno);
 	SPDK_DEBUGLOG(SPDK_LOG_BLOBFS, "file=%s\n", args->op.create.name);
 }
 
@@ -2666,6 +2669,7 @@ _file_sync(struct spdk_file *file, struct spdk_fs_channel *channel,
 	flush_req = alloc_fs_request(channel);
 	if (!flush_req) {
 		SPDK_ERRLOG("Cannot allocate flush req for file=%s\n", file->name);
+		free_fs_request(sync_req);
 		pthread_spin_unlock(&file->lock);
 		cb_fn(cb_arg, -ENOMEM);
 		return;

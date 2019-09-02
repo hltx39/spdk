@@ -213,7 +213,7 @@ fi
 # By default, --with-dpdk is not set meaning the SPDK build will use the DPDK submodule.
 # If a DPDK installation is found in a well-known location though, WITH_DPDK_DIR will be
 # set which will override the default and use that DPDK installation instead.
-if [ ! -z "$WITH_DPDK_DIR" ]; then
+if [ -n "$WITH_DPDK_DIR" ]; then
 	config_params+=" --with-dpdk=$WITH_DPDK_DIR"
 fi
 
@@ -306,7 +306,7 @@ function process_core() {
 			exe=$(eu-readelf -n "$core" | grep -oP -m1 "$exe.+")
 		fi
 		echo "exe for $core is $exe"
-		if [[ ! -z "$exe" ]]; then
+		if [[ -n "$exe" ]]; then
 			if hash gdb &>/dev/null; then
 				gdb -batch -ex "thread apply all bt full" $exe $core
 			fi
@@ -594,7 +594,7 @@ function part_dev_by_gpt () {
 			parted -s $nbd_path mklabel gpt mkpart first '0%' '50%' mkpart second '50%' '100%'
 
 			# change the GUID to SPDK GUID value
-			SPDK_GPT_GUID=$(grep SPDK_GPT_PART_TYPE_GUID $rootdir/lib/bdev/gpt/gpt.h \
+			SPDK_GPT_GUID=$(grep SPDK_GPT_PART_TYPE_GUID $rootdir/module/bdev/gpt/gpt.h \
 				| awk -F "(" '{ print $2}' | sed 's/)//g' \
 				| awk -F ", " '{ print $1 "-" $2 "-" $3 "-" $4 "-" $5}' | sed 's/0x//g')
 			sgdisk -t 1:$SPDK_GPT_GUID $nbd_path
@@ -651,7 +651,7 @@ function waitforblk()
 	local i=0
 	while ! lsblk -l -o NAME | grep -q -w $1; do
 		[ $i -lt 15 ] || break
-		i=$[$i+1]
+		i=$((i+1))
 		sleep 1
 	done
 
@@ -667,7 +667,7 @@ function waitforblk_disconnect()
 	local i=0
 	while lsblk -l -o NAME | grep -q -w $1; do
 		[ $i -lt 15 ] || break
-		i=$[$i+1]
+		i=$((i+1))
 		sleep 1
 	done
 
@@ -683,7 +683,7 @@ function waitforfile()
 	local i=0
 	while [ ! -e $1 ]; do
 		[ $i -lt 200 ] || break
-		i=$[$i+1]
+		i=$((i+1))
 		sleep 0.1
 	done
 
@@ -723,6 +723,7 @@ EOL
 
 	if [ "$workload" == "verify" ]; then
 		echo "verify=sha1" >> $config_file
+		echo "verify_backlog=1024" >> $config_file
 		echo "rw=randwrite" >> $config_file
 	elif [ "$workload" == "trim" ]; then
 		echo "rw=trimwrite" >> $config_file
@@ -777,7 +778,7 @@ function fio_nvme()
 function get_lvs_free_mb()
 {
 	local lvs_uuid=$1
-	local lvs_info=$($rpc_py get_lvol_stores)
+	local lvs_info=$($rpc_py bdev_lvol_get_lvstores)
 	local fc=$(jq ".[] | select(.uuid==\"$lvs_uuid\") .free_clusters" <<< "$lvs_info")
 	local cs=$(jq ".[] | select(.uuid==\"$lvs_uuid\") .cluster_size" <<< "$lvs_info")
 
@@ -816,7 +817,7 @@ function freebsd_update_contigmem_mod()
 {
 	if [ $(uname) = FreeBSD ]; then
 		kldunload contigmem.ko || true
-		if [ ! -z "$WITH_DPDK_DIR" ]; then
+		if [ -n "$WITH_DPDK_DIR" ]; then
 			echo "Warning: SPDK only works on FreeBSD with patches that only exist in SPDK's dpdk submodule"
 			cp -f "$WITH_DPDK_DIR/kmod/contigmem.ko" /boot/modules/
 			cp -f "$WITH_DPDK_DIR/kmod/contigmem.ko" /boot/kernel/
@@ -825,6 +826,27 @@ function freebsd_update_contigmem_mod()
 			cp -f "$rootdir/dpdk/build/kmod/contigmem.ko" /boot/kernel/
 		fi
 	fi
+}
+
+function get_nvme_name_from_bdf {
+	blkname=()
+
+	nvme_devs=$(lsblk -d --output NAME | grep "^nvme") || true
+	if [ -z "$nvme_devs" ]; then
+		return
+	fi
+	for dev in $nvme_devs; do
+		link_name=$(readlink /sys/block/$dev/device/device) || true
+		if [ -z "$link_name" ]; then
+			link_name=$(readlink /sys/block/$dev/device)
+		fi
+		bdf=$(basename "$link_name")
+		if [ "$bdf" = "$1" ]; then
+			blkname+=($dev)
+		fi
+	done
+
+	printf '%s\n' "${blkname[@]}"
 }
 
 set -o errtrace

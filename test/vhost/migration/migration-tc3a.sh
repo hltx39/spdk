@@ -69,7 +69,7 @@ function check_rdma_connection()
 function host1_cleanup_nvmf()
 {
 	notice "Shutting down nvmf_tgt on local server"
-	if [[ ! -z "$1" ]]; then
+	if [[ -n "$1" ]]; then
 		pkill --signal $1 -F $nvmf_dir/nvmf_tgt.pid
 	else
 		pkill -F $nvmf_dir/nvmf_tgt.pid
@@ -122,7 +122,7 @@ function host1_start_vhost()
 
 	notice "Starting vhost0 instance on local server"
 	trap 'host1_cleanup_vhost; error_exit "${FUNCNAME}" "${LINENO}"' INT ERR EXIT
-	vhost_run --vhost-num=0 --no-pci
+	vhost_run 0 "-u"
 	$rpc_0 construct_nvme_bdev -b Nvme0 -t rdma -f ipv4 -a $RDMA_TARGET_IP -s 4420 -n "nqn.2018-02.io.spdk:cnode1"
 	$rpc_0 construct_vhost_scsi_controller $incoming_vm_ctrlr
 	$rpc_0 add_vhost_scsi_lun $incoming_vm_ctrlr 0 Nvme0n1

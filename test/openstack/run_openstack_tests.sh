@@ -10,9 +10,9 @@ TEST_TRANSPORT='rdma'
 nvmftestinit
 
 function finish_test {
-	$rpc_py destroy_lvol_store -l lvs0
+	$rpc_py bdev_lvol_delete_lvstore -l lvs0
 	kill -9 $rpc_proxy_pid
-	killprocess $spdk_tgt_pid
+	killprocess $nvmfpid
 	rm $testdir/conf.json
 }
 
@@ -21,9 +21,9 @@ trap "finish_test" SIGINT SIGTERM EXIT
 timing_enter run_spdk_tgt
 $rootdir/scripts/gen_nvme.sh >> $testdir/conf.json
 $rootdir/app/spdk_tgt/spdk_tgt -m 0x3 -p 0 -s 1024 -c $testdir/conf.json &
-spdk_tgt_pid=$!
-waitforlisten $spdk_tgt_pid
-$rpc_py set_bdev_nvme_hotplug -e
+nvmfpid=$!
+waitforlisten $nvmfpid
+$rpc_py bdev_nvme_set_hotplug -e
 timing_exit run_spdk_tgt
 
 timing_enter run_rpc_proxy
@@ -33,8 +33,8 @@ timing_exit run_rpc_proxy
 
 timing_enter configure_spdk
 $rpc_py get_bdevs
-$rpc_py destroy_lvol_store -l lvs0 || true
-$rpc_py construct_lvol_store Nvme0n1 lvs0
+$rpc_py bdev_lvol_delete_lvstore -l lvs0 || true
+$rpc_py bdev_lvol_create_lvstore Nvme0n1 lvs0
 $rpc_py get_bdevs
 timing_exit configure_spdk
 

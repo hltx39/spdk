@@ -28,7 +28,7 @@ precond_fio_bin="/usr/src/fio/fio"
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Shortcut script for doing automated test"
 	echo "Usage: $(basename $1) [OPTIONS]"
 	echo
@@ -72,13 +72,13 @@ function cleanup_lvol_cfg()
 {
 	notice "Removing lvol bdevs"
 	for lvol_bdev in "${lvol_bdevs[@]}"; do
-		$rpc_py destroy_lvol_bdev $lvol_bdev
+		$rpc_py bdev_lvol_delete $lvol_bdev
 		notice "lvol bdev $lvol_bdev removed"
 	done
 
 	notice "Removing lvol stores"
 	for lvol_store in "${lvol_stores[@]}"; do
-		$rpc_py destroy_lvol_store -u $lvol_store
+		$rpc_py bdev_lvol_delete_lvstore -u $lvol_store
 		notice "lvol store $lvol_store removed"
 	done
 }
@@ -139,7 +139,7 @@ while getopts 'xh-:' optchar; do
 	esac
 done
 
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 if [[ -n $custom_cpu_cfg ]]; then
 	source $custom_cpu_cfg
@@ -245,7 +245,7 @@ if [[ "$ctrl_type" == "kernel_vhost" ]]; then
 else
 	# Run vhost process and prepare split vbdevs or lvol bdevs
 	notice "running SPDK vhost"
-	vhost_run
+	vhost_run 0
 	notice "..."
 
 	if [[ $use_split == true ]]; then
@@ -263,12 +263,12 @@ else
 		notice "Using logical volumes"
 		trap 'cleanup_lvol_cfg; error_exit "${FUNCNAME}" "${LINENO}"' INT ERR
 		for (( i=0; i<$max_disks; i++ ));do
-			ls_guid=$($rpc_py construct_lvol_store Nvme${i}n1 lvs_$i --clear-method none)
+			ls_guid=$($rpc_py bdev_lvol_create_lvstore Nvme${i}n1 lvs_$i --clear-method none)
 			lvol_stores+=("$ls_guid")
 			for (( j=0; j<${splits[$i]}; j++)); do
 				free_mb=$(get_lvs_free_mb "$ls_guid")
 				size=$((free_mb / (${splits[$i]}-j) ))
-				lb_name=$($rpc_py construct_lvol_bdev -u $ls_guid lbd_$j $size --clear-method none)
+				lb_name=$($rpc_py bdev_lvol_create -u $ls_guid lbd_$j $size --clear-method none)
 				lvol_bdevs+=("$lb_name")
 			done
 		done
@@ -386,7 +386,7 @@ else
 	else
 		cleanup_lvol_cfg
 	fi
-	vhost_kill
+	vhost_kill 0
 fi
 
 if [[ -n "$kernel_cpus" ]]; then

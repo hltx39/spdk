@@ -31,8 +31,6 @@
  *   OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "json_config.h"
-
 #include "spdk/stdinc.h"
 
 #include "spdk/util.h"
@@ -88,7 +86,7 @@ typedef void (*client_resp_handler)(struct load_json_config_ctx *,
 struct load_json_config_ctx {
 	/* Thread used during configuration. */
 	struct spdk_thread *thread;
-	spdk_msg_fn cb_fn;
+	spdk_subsystem_init_fn cb_fn;
 	void *cb_arg;
 
 	/* Current subsystem */
@@ -134,14 +132,9 @@ spdk_app_json_config_load_done(struct load_json_config_ctx *ctx, int rc)
 
 	spdk_rpc_finish();
 
-	if (rc) {
-		SPDK_ERRLOG("Config load failed. Stopping SPDK application.\n");
-		spdk_app_stop(rc);
-	} else {
-		ctx->cb_fn(ctx->cb_arg);
-	}
+	SPDK_DEBUG_APP_CFG("Config load finished with rc %d\n", rc);
+	ctx->cb_fn(rc, ctx->cb_arg);
 
-	SPDK_DEBUG_APP_CFG("Config load finished\n");
 	free(ctx->json_data);
 	free(ctx->values);
 	free(ctx);
@@ -397,13 +390,20 @@ out:
 }
 
 static void
-subsystem_init_done_resp_cb(struct load_json_config_ctx *ctx,
-			    struct spdk_jsonrpc_client_response *resp)
+subsystem_init_done(int rc, void *arg1)
 {
-	spdk_jsonrpc_client_free_response(resp);
+	struct load_json_config_ctx *ctx = arg1;
 
+	if (rc) {
+		spdk_app_json_config_load_done(ctx, rc);
+		return;
+	}
+
+	spdk_rpc_set_state(SPDK_RPC_RUNTIME);
 	/* Another round. This time for RUNTIME methods */
 	SPDK_DEBUG_APP_CFG("'start_subsystem_init' done - continuing configuration\n");
+
+	assert(ctx != NULL);
 	if (ctx->subsystems) {
 		ctx->subsystems_it = spdk_json_array_first(ctx->subsystems);
 	}
@@ -437,27 +437,11 @@ static void
 spdk_app_json_config_load_subsystem(void *_ctx)
 {
 	struct load_json_config_ctx *ctx = _ctx;
-	struct spdk_jsonrpc_client_request *req;
-	struct spdk_json_write_ctx *w;
 
 	if (ctx->subsystems_it == NULL) {
 		if (spdk_rpc_get_state() == SPDK_RPC_STARTUP) {
 			SPDK_DEBUG_APP_CFG("No more entries for current state, calling 'start_subsystem_init'\n");
-			req = spdk_jsonrpc_client_create_request();
-			if (!req) {
-				spdk_app_json_config_load_done(ctx, -ENOMEM);
-				return;
-			}
-
-			w = spdk_jsonrpc_begin_request(req, ctx->rpc_request_id++, "start_subsystem_init");
-			if (!w) {
-				spdk_jsonrpc_client_free_request(req);
-				spdk_app_json_config_load_done(ctx, -ENOMEM);
-				return;
-			}
-			spdk_jsonrpc_end_request(req, w);
-
-			client_send_request(ctx, req, subsystem_init_done_resp_cb);
+			spdk_subsystem_init(subsystem_init_done, ctx);
 		} else {
 			spdk_app_json_config_load_done(ctx, 0);
 		}
@@ -546,14 +530,14 @@ err:
 
 void
 spdk_app_json_config_load(const char *json_config_file, const char *rpc_addr,
-			  spdk_msg_fn cb_fn, void *cb_arg)
+			  spdk_subsystem_init_fn cb_fn, void *cb_arg)
 {
 	struct load_json_config_ctx *ctx = calloc(1, sizeof(*ctx));
 	int rc;
 
 	assert(cb_fn);
 	if (!ctx) {
-		spdk_app_stop(-ENOMEM);
+		cb_fn(-ENOMEM, cb_arg);
 		return;
 	}
 

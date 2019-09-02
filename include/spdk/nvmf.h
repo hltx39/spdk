@@ -50,6 +50,8 @@
 extern "C" {
 #endif
 
+#define NVMF_TGT_NAME_MAX_LENGTH	256
+
 struct spdk_nvmf_tgt;
 struct spdk_nvmf_subsystem;
 struct spdk_nvmf_ctrlr;
@@ -62,6 +64,11 @@ struct spdk_nvmf_listener;
 struct spdk_nvmf_poll_group;
 struct spdk_json_write_ctx;
 struct spdk_nvmf_transport;
+
+struct spdk_nvmf_target_opts {
+	char		name[NVMF_TGT_NAME_MAX_LENGTH];
+	uint32_t	max_subsystems;
+};
 
 struct spdk_nvmf_transport_opts {
 	uint16_t	max_queue_depth;
@@ -110,11 +117,11 @@ struct spdk_nvmf_transport_poll_group_stat {
 /**
  * Construct an NVMe-oF target.
  *
- * \param max_subsystems the maximum number of subsystems allowed by the target.
+ * \param opts a pointer to an spdk_nvmf_target_opts structure.
  *
  * \return a pointer to a NVMe-oF target on success, or NULL on failure.
  */
-struct spdk_nvmf_tgt *spdk_nvmf_tgt_create(uint32_t max_subsystems);
+struct spdk_nvmf_tgt *spdk_nvmf_tgt_create(struct spdk_nvmf_target_opts *opts);
 
 typedef void (spdk_nvmf_tgt_destroy_done_fn)(void *ctx, int status);
 
@@ -128,6 +135,20 @@ typedef void (spdk_nvmf_tgt_destroy_done_fn)(void *ctx, int status);
 void spdk_nvmf_tgt_destroy(struct spdk_nvmf_tgt *tgt,
 			   spdk_nvmf_tgt_destroy_done_fn cb_fn,
 			   void *cb_arg);
+
+/**
+ * Get a pointer to an NVMe-oF target.
+ *
+ * In order to support some legacy applications and RPC methods that may rely on the
+ * concept that there is only one target, the name parameter can be passed as NULL.
+ * If there is only one available target, that target will be returned.
+ * Otherwise, name is a required parameter.
+ *
+ * \param name The name provided when the target was created.
+ *
+ * \return The target with the given name, or NULL if no match was found.
+ */
+struct spdk_nvmf_tgt *spdk_nvmf_get_tgt(const char *name);
 
 /**
  * Write NVMe-oF target configuration into provided JSON context.

@@ -5,7 +5,7 @@ rootdir=$(readlink -f $testdir/../../..)
 source $rootdir/test/common/autotest_common.sh
 source $rootdir/test/vhost/common.sh
 
-rpc_py="$testdir/../../../scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$testdir/../../../scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 vm_img=""
 disk="Nvme0n1"
@@ -13,7 +13,7 @@ x=""
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Shortcut script for automated readonly test for vhost-block"
 	echo "For test details check test_plan.md"
 	echo
@@ -69,7 +69,7 @@ function blk_ro_tc1()
 	local vm_dir="$VHOST_DIR/vms/$vm_no"
 
 	if [[ $disk =~ .*malloc.* ]]; then
-		disk_name=$($rpc_py construct_malloc_bdev 512 4096)
+		disk_name=$($rpc_py bdev_malloc_create 512 4096)
 		if [ $? != 0 ]; then
 			fail "Failed to create malloc bdev"
 		fi
@@ -121,7 +121,7 @@ function blk_ro_tc1()
 	vm_shutdown_all
 }
 
-vhost_run
+vhost_run 0
 if [[ -z $x ]]; then
 	set +x
 fi
@@ -130,6 +130,6 @@ blk_ro_tc1
 
 $rpc_py delete_nvme_controller Nvme0
 
-vhost_kill
+vhost_kill 0
 
 vhosttestfini

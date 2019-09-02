@@ -72,33 +72,117 @@ struct spdk_reactor {
 	/* Lightweight threads running on this reactor */
 	TAILQ_HEAD(, spdk_lw_thread)			threads;
 
-	/* Poller for get the rusage for the reactor. */
-	struct spdk_poller				*rusage_poller;
-
 	/* The last known rusage values */
 	struct rusage					rusage;
 
 	struct spdk_ring				*events;
+
+	bool						is_valid;
 } __attribute__((aligned(64)));
 
 static struct spdk_reactor *g_reactors;
-
+static struct spdk_cpuset *g_reactor_core_mask;
 static enum spdk_reactor_state	g_reactor_state = SPDK_REACTOR_STATE_INVALID;
 
 static bool g_context_switch_monitor_enabled = true;
 
-static void spdk_reactor_construct(struct spdk_reactor *w, uint32_t lcore);
-
 static struct spdk_mempool *g_spdk_event_mempool = NULL;
 
-static struct spdk_cpuset *g_spdk_app_core_mask;
+static void
+spdk_reactor_construct(struct spdk_reactor *reactor, uint32_t lcore)
+{
+	reactor->lcore = lcore;
+	reactor->is_valid = true;
+
+	TAILQ_INIT(&reactor->threads);
+
+	reactor->events = spdk_ring_create(SPDK_RING_TYPE_MP_SC, 65536, SPDK_ENV_SOCKET_ID_ANY);
+	assert(reactor->events != NULL);
+}
 
 static struct spdk_reactor *
 spdk_reactor_get(uint32_t lcore)
 {
 	struct spdk_reactor *reactor;
-	reactor = spdk_likely(g_reactors) ? &g_reactors[lcore] : NULL;
+
+	if (g_reactors == NULL) {
+		SPDK_WARNLOG("Called spdk_reactor_get() while the g_reactors array was NULL!\n");
+		return NULL;
+	}
+
+	reactor = &g_reactors[lcore];
+
+	if (reactor->is_valid == false) {
+		return NULL;
+	}
+
 	return reactor;
+}
+
+static int spdk_reactor_schedule_thread(struct spdk_thread *thread);
+
+int
+spdk_reactors_init(void)
+{
+	int rc;
+	uint32_t i, last_core;
+	char mempool_name[32];
+
+	snprintf(mempool_name, sizeof(mempool_name), "evtpool_%d", getpid());
+	g_spdk_event_mempool = spdk_mempool_create(mempool_name,
+			       262144 - 1, /* Power of 2 minus 1 is optimal for memory consumption */
+			       sizeof(struct spdk_event),
+			       SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
+			       SPDK_ENV_SOCKET_ID_ANY);
+
+	if (g_spdk_event_mempool == NULL) {
+		SPDK_ERRLOG("spdk_event_mempool creation failed\n");
+		return -1;
+	}
+
+	/* struct spdk_reactor must be aligned on 64 byte boundary */
+	last_core = spdk_env_get_last_core();
+	rc = posix_memalign((void **)&g_reactors, 64,
+			    (last_core + 1) * sizeof(struct spdk_reactor));
+	if (rc != 0) {
+		SPDK_ERRLOG("Could not allocate array size=%u for g_reactors\n",
+			    last_core + 1);
+		spdk_mempool_free(g_spdk_event_mempool);
+		return -1;
+	}
+
+	memset(g_reactors, 0, (last_core + 1) * sizeof(struct spdk_reactor));
+
+	spdk_thread_lib_init(spdk_reactor_schedule_thread, sizeof(struct spdk_lw_thread));
+
+	SPDK_ENV_FOREACH_CORE(i) {
+		spdk_reactor_construct(&g_reactors[i], i);
+	}
+
+	g_reactor_state = SPDK_REACTOR_STATE_INITIALIZED;
+
+	return 0;
+}
+
+void
+spdk_reactors_fini(void)
+{
+	uint32_t i;
+	struct spdk_reactor *reactor;
+
+	spdk_thread_lib_fini();
+
+	SPDK_ENV_FOREACH_CORE(i) {
+		reactor = spdk_reactor_get(i);
+		if (spdk_likely(reactor != NULL) && reactor->events != NULL) {
+			spdk_ring_free(reactor->events);
+		}
+	}
+
+	spdk_mempool_free(g_spdk_event_mempool);
+
+	free(g_reactors);
+	g_reactors = NULL;
 }
 
 struct spdk_event *
@@ -134,7 +218,9 @@ spdk_event_call(struct spdk_event *event)
 
 	reactor = spdk_reactor_get(event->lcore);
 
+	assert(reactor != NULL);
 	assert(reactor->events != NULL);
+
 	rc = spdk_ring_enqueue(reactor->events, (void **)&event, 1, NULL);
 	if (rc != 1) {
 		assert(false);
@@ -299,17 +385,6 @@ _spdk_reactor_run(void *arg)
 	return 0;
 }
 
-static void
-spdk_reactor_construct(struct spdk_reactor *reactor, uint32_t lcore)
-{
-	reactor->lcore = lcore;
-
-	TAILQ_INIT(&reactor->threads);
-
-	reactor->events = spdk_ring_create(SPDK_RING_TYPE_MP_SC, 65536, SPDK_ENV_SOCKET_ID_ANY);
-	assert(reactor->events != NULL);
-}
-
 int
 spdk_app_parse_core_mask(const char *mask, struct spdk_cpuset *cpumask)
 {
@@ -330,7 +405,7 @@ spdk_app_parse_core_mask(const char *mask, struct spdk_cpuset *cpumask)
 struct spdk_cpuset *
 spdk_app_get_core_mask(void)
 {
-	return g_spdk_app_core_mask;
+	return g_reactor_core_mask;
 }
 
 void
@@ -350,12 +425,16 @@ spdk_reactors_start(void)
 	}
 
 	g_reactor_state = SPDK_REACTOR_STATE_RUNNING;
-	g_spdk_app_core_mask = spdk_cpuset_alloc();
+	g_reactor_core_mask = spdk_cpuset_alloc();
 
 	current_core = spdk_env_get_current_core();
 	SPDK_ENV_FOREACH_CORE(i) {
 		if (i != current_core) {
 			reactor = spdk_reactor_get(i);
+			if (reactor == NULL) {
+				continue;
+			}
+
 			rc = spdk_env_thread_launch_pinned(reactor->lcore, _spdk_reactor_run, reactor);
 			if (rc < 0) {
 				SPDK_ERRLOG("Unable to start reactor thread on core %u\n", reactor->lcore);
@@ -371,20 +450,21 @@ spdk_reactors_start(void)
 
 			spdk_thread_create(thread_name, tmp_cpumask);
 		}
-		spdk_cpuset_set_cpu(g_spdk_app_core_mask, i, true);
+		spdk_cpuset_set_cpu(g_reactor_core_mask, i, true);
 	}
 
 	spdk_cpuset_free(tmp_cpumask);
 
 	/* Start the master reactor */
 	reactor = spdk_reactor_get(current_core);
+	assert(reactor != NULL);
 	_spdk_reactor_run(reactor);
 
 	spdk_env_thread_wait_all();
 
 	g_reactor_state = SPDK_REACTOR_STATE_SHUTDOWN;
-	spdk_cpuset_free(g_spdk_app_core_mask);
-	g_spdk_app_core_mask = NULL;
+	spdk_cpuset_free(g_reactor_core_mask);
+	g_reactor_core_mask = NULL;
 }
 
 void
@@ -403,6 +483,7 @@ _schedule_thread(void *arg1, void *arg2)
 	struct spdk_reactor *reactor;
 
 	reactor = spdk_reactor_get(spdk_env_get_current_core());
+	assert(reactor != NULL);
 
 	TAILQ_INSERT_TAIL(&reactor->threads, lw_thread, link);
 }
@@ -446,72 +527,6 @@ spdk_reactor_schedule_thread(struct spdk_thread *thread)
 	spdk_event_call(evt);
 
 	return 0;
-}
-
-int
-spdk_reactors_init(void)
-{
-	int rc;
-	uint32_t i, last_core;
-	struct spdk_reactor *reactor;
-	char mempool_name[32];
-
-	snprintf(mempool_name, sizeof(mempool_name), "evtpool_%d", getpid());
-	g_spdk_event_mempool = spdk_mempool_create(mempool_name,
-			       262144 - 1, /* Power of 2 minus 1 is optimal for memory consumption */
-			       sizeof(struct spdk_event),
-			       SPDK_MEMPOOL_DEFAULT_CACHE_SIZE,
-			       SPDK_ENV_SOCKET_ID_ANY);
-
-	if (g_spdk_event_mempool == NULL) {
-		SPDK_ERRLOG("spdk_event_mempool creation failed\n");
-		return -1;
-	}
-
-	/* struct spdk_reactor must be aligned on 64 byte boundary */
-	last_core = spdk_env_get_last_core();
-	rc = posix_memalign((void **)&g_reactors, 64,
-			    (last_core + 1) * sizeof(struct spdk_reactor));
-	if (rc != 0) {
-		SPDK_ERRLOG("Could not allocate array size=%u for g_reactors\n",
-			    last_core + 1);
-		spdk_mempool_free(g_spdk_event_mempool);
-		return -1;
-	}
-
-	memset(g_reactors, 0, (last_core + 1) * sizeof(struct spdk_reactor));
-
-	spdk_thread_lib_init(spdk_reactor_schedule_thread, sizeof(struct spdk_lw_thread));
-
-	SPDK_ENV_FOREACH_CORE(i) {
-		reactor = spdk_reactor_get(i);
-		spdk_reactor_construct(reactor, i);
-	}
-
-	g_reactor_state = SPDK_REACTOR_STATE_INITIALIZED;
-
-	return 0;
-}
-
-void
-spdk_reactors_fini(void)
-{
-	uint32_t i;
-	struct spdk_reactor *reactor;
-
-	spdk_thread_lib_fini();
-
-	SPDK_ENV_FOREACH_CORE(i) {
-		reactor = spdk_reactor_get(i);
-		if (spdk_likely(reactor != NULL) && reactor->events != NULL) {
-			spdk_ring_free(reactor->events);
-		}
-	}
-
-	spdk_mempool_free(g_spdk_event_mempool);
-
-	free(g_reactors);
-	g_reactors = NULL;
 }
 
 SPDK_LOG_REGISTER_COMPONENT("reactor", SPDK_LOG_REACTOR)

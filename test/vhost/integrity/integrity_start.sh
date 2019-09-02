@@ -10,7 +10,7 @@ vm_fs="ext4"
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Shortcut script for doing automated test"
 	echo "Usage: $(basename $1) [OPTIONS]"
 	echo
@@ -28,8 +28,8 @@ function usage()
 function clean_lvol_cfg()
 {
 	notice "Removing lvol bdev and lvol store"
-	$rpc_py destroy_lvol_bdev lvol_store/lvol_bdev
-	$rpc_py destroy_lvol_store -l lvol_store
+	$rpc_py bdev_lvol_delete lvol_store/lvol_bdev
+	$rpc_py bdev_lvol_delete_lvstore -l lvol_store
 }
 
 while getopts 'xh-:' optchar; do
@@ -52,7 +52,7 @@ done
 vhosttestinit
 
 . $(readlink -e "$(dirname $0)/../common.sh") || exit 1
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 trap 'error_exit "${FUNCNAME}" "${LINENO}"' SIGTERM SIGABRT ERR
 
@@ -60,14 +60,14 @@ trap 'error_exit "${FUNCNAME}" "${LINENO}"' SIGTERM SIGABRT ERR
 vm_kill_all
 
 notice "Starting SPDK vhost"
-vhost_run
+vhost_run 0
 notice "..."
 
 # Set up lvols and vhost controllers
 trap 'clean_lvol_cfg; error_exit "${FUNCNAME}" "${LINENO}"' SIGTERM SIGABRT ERR
 notice "Constructing lvol store and lvol bdev on top of Nvme0n1"
-lvs_uuid=$($rpc_py construct_lvol_store Nvme0n1 lvol_store)
-$rpc_py construct_lvol_bdev lvol_bdev 10000 -l lvol_store
+lvs_uuid=$($rpc_py bdev_lvol_create_lvstore Nvme0n1 lvol_store)
+$rpc_py bdev_lvol_create lvol_bdev 10000 -l lvol_store
 
 if [[ "$ctrl_type" == "spdk_vhost_scsi" ]]; then
 	$rpc_py construct_vhost_scsi_controller naa.Nvme0n1.0
@@ -98,6 +98,6 @@ clean_lvol_cfg
 $rpc_py delete_nvme_controller Nvme0
 
 notice "Shutting down SPDK vhost app..."
-vhost_kill
+vhost_kill 0
 
 vhosttestfini

@@ -24,14 +24,14 @@ function running_config() {
 	# keep the same iscsiadm configuration to confirm that the
 	#  config file matched the running configuration
 	killprocess $pid
-	trap "iscsicleanup; delete_tmp_files; exit 1" SIGINT SIGTERM EXIT
+	trap 'iscsicleanup; delete_tmp_files; exit 1' SIGINT SIGTERM EXIT
 
 	timing_enter start_iscsi_tgt2
 
 	$ISCSI_APP --wait-for-rpc &
 	pid=$!
 	echo "Process pid: $pid"
-	trap "iscsicleanup; killprocess $pid; delete_tmp_files; exit 1" SIGINT SIGTERM EXIT
+	trap 'iscsicleanup; killprocess $pid; delete_tmp_files; exit 1' SIGINT SIGTERM EXIT
 	waitforlisten $pid
 
 	$rpc_py load_config < $testdir/iscsi2.json
@@ -68,7 +68,7 @@ $ISCSI_APP --wait-for-rpc &
 pid=$!
 echo "Process pid: $pid"
 
-trap "killprocess $pid; exit 1" SIGINT SIGTERM EXIT
+trap 'killprocess $pid; exit 1' SIGINT SIGTERM EXIT
 
 waitforlisten $pid
 
@@ -81,10 +81,10 @@ timing_exit start_iscsi_tgt
 $rpc_py add_portal_group $PORTAL_TAG $TARGET_IP:$ISCSI_PORT
 $rpc_py add_initiator_group $INITIATOR_TAG $INITIATOR_NAME $NETMASK
 # Create a RAID-0 bdev from two malloc bdevs
-malloc_bdevs="$($rpc_py construct_malloc_bdev $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE) "
-malloc_bdevs+="$($rpc_py construct_malloc_bdev $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)"
-$rpc_py construct_raid_bdev -n raid0 -s 64 -r 0 -b "$malloc_bdevs"
-bdev=$( $rpc_py construct_malloc_bdev 1024 512 )
+malloc_bdevs="$($rpc_py bdev_malloc_create $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE) "
+malloc_bdevs+="$($rpc_py bdev_malloc_create $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)"
+$rpc_py construct_raid_bdev -n raid0 -z 64 -r 0 -b "$malloc_bdevs"
+bdev=$( $rpc_py bdev_malloc_create 1024 512 )
 # "raid0:0" ==> use raid0 blockdev for LUN0
 # "1:2" ==> map PortalGroup1 to InitiatorGroup2
 # "64" ==> iSCSI queue depth 64
@@ -96,7 +96,7 @@ iscsiadm -m discovery -t sendtargets -p $TARGET_IP:$ISCSI_PORT
 iscsiadm -m node --login -p $TARGET_IP:$ISCSI_PORT
 waitforiscsidevices 2
 
-trap "iscsicleanup; killprocess $pid; iscsitestfini $1 $2; delete_tmp_files; exit 1" SIGINT SIGTERM EXIT
+trap 'iscsicleanup; killprocess $pid; iscsitestfini $1 $2; delete_tmp_files; exit 1' SIGINT SIGTERM EXIT
 
 $fio_py -p iscsi -i 4096 -d 1 -t randrw -r 1 -v
 $fio_py -p iscsi -i 131072 -d 32 -t randrw -r 1 -v

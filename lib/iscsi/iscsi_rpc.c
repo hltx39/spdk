@@ -635,13 +635,9 @@ rpc_delete_target_node_done(void *cb_arg, int rc)
 	free_rpc_delete_target_node(&ctx->req);
 
 	w = spdk_jsonrpc_begin_result(ctx->request);
-	if (w == NULL) {
-		goto exit;
-	}
-
 	spdk_json_write_bool(w, rc == 0);
 	spdk_jsonrpc_end_result(ctx->request, w);
-exit:
+
 	free(ctx);
 }
 
@@ -799,9 +795,13 @@ spdk_rpc_add_portal_group(struct spdk_jsonrpc_request *request,
 		goto out;
 	}
 	for (i = 0; i < req.portal_list.num_portals; i++) {
+		if (req.portal_list.portals[i].cpumask) {
+			SPDK_WARNLOG("A portal was specified with a CPU mask which is no longer supported.\n");
+			SPDK_WARNLOG("Ignoring the cpumask.\n");
+		}
+
 		portal = spdk_iscsi_portal_create(req.portal_list.portals[i].host,
-						  req.portal_list.portals[i].port,
-						  req.portal_list.portals[i].cpumask);
+						  req.portal_list.portals[i].port);
 		if (portal == NULL) {
 			SPDK_ERRLOG("portal_create failed\n");
 			goto out;
@@ -877,14 +877,42 @@ invalid:
 }
 SPDK_RPC_REGISTER("delete_portal_group", spdk_rpc_delete_portal_group, SPDK_RPC_RUNTIME)
 
+struct rpc_get_iscsi_connections_ctx {
+	struct spdk_jsonrpc_request *request;
+	struct spdk_json_write_ctx *w;
+};
+
+static void
+rpc_get_iscsi_connections_done(struct spdk_io_channel_iter *i, int status)
+{
+	struct rpc_get_iscsi_connections_ctx *ctx = spdk_io_channel_iter_get_ctx(i);
+
+	spdk_json_write_array_end(ctx->w);
+	spdk_jsonrpc_end_result(ctx->request, ctx->w);
+
+	free(ctx);
+}
+
+static void
+rpc_get_iscsi_connections(struct spdk_io_channel_iter *i)
+{
+	struct rpc_get_iscsi_connections_ctx *ctx = spdk_io_channel_iter_get_ctx(i);
+	struct spdk_io_channel *ch = spdk_io_channel_iter_get_channel(i);
+	struct spdk_iscsi_poll_group *pg = spdk_io_channel_get_ctx(ch);
+	struct spdk_iscsi_conn *conn;
+
+	STAILQ_FOREACH(conn, &pg->connections, link) {
+		spdk_iscsi_conn_info_json(ctx->w, conn);
+	}
+
+	spdk_for_each_channel_continue(i, 0);
+}
+
 static void
 spdk_rpc_get_iscsi_connections(struct spdk_jsonrpc_request *request,
 			       const struct spdk_json_val *params)
 {
-	struct spdk_json_write_ctx *w;
-	struct spdk_iscsi_conn *conns = g_conns_array;
-	int i;
-	uint16_t tsih;
+	struct rpc_get_iscsi_connections_ctx *ctx;
 
 	if (params != NULL) {
 		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INVALID_PARAMS,
@@ -892,48 +920,22 @@ spdk_rpc_get_iscsi_connections(struct spdk_jsonrpc_request *request,
 		return;
 	}
 
-	w = spdk_jsonrpc_begin_result(request);
-	spdk_json_write_array_begin(w);
-
-	for (i = 0; i < MAX_ISCSI_CONNECTIONS; i++) {
-		struct spdk_iscsi_conn *c = &conns[i];
-
-		if (!c->is_valid) {
-			continue;
-		}
-
-		spdk_json_write_object_begin(w);
-
-		spdk_json_write_named_int32(w, "id", c->id);
-
-		spdk_json_write_named_int32(w, "cid", c->cid);
-
-		/*
-		 * If we try to return data for a connection that has not
-		 *  logged in yet, the session will not be set.  So in this
-		 *  case, return -1 for the tsih rather than segfaulting
-		 *  on the null c->sess.
-		 */
-		if (c->sess == NULL) {
-			tsih = -1;
-		} else {
-			tsih = c->sess->tsih;
-		}
-		spdk_json_write_named_int32(w, "tsih", tsih);
-
-		spdk_json_write_named_int32(w, "lcore_id", c->lcore);
-
-		spdk_json_write_named_string(w, "initiator_addr", c->initiator_addr);
-
-		spdk_json_write_named_string(w, "target_addr", c->target_addr);
-
-		spdk_json_write_named_string(w, "target_node_name", c->target_short_name);
-
-		spdk_json_write_object_end(w);
+	ctx = calloc(1, sizeof(struct rpc_get_iscsi_connections_ctx));
+	if (ctx == NULL) {
+		SPDK_ERRLOG("Failed to allocate rpc_get_iscsi_conns_ctx struct\n");
+		spdk_jsonrpc_send_error_response(request, -ENOMEM, spdk_strerror(ENOMEM));
+		return;
 	}
-	spdk_json_write_array_end(w);
 
-	spdk_jsonrpc_end_result(request, w);
+	ctx->request = request;
+	ctx->w = spdk_jsonrpc_begin_result(request);
+
+	spdk_json_write_array_begin(ctx->w);
+
+	spdk_for_each_channel(&g_spdk_iscsi,
+			      rpc_get_iscsi_connections,
+			      ctx,
+			      rpc_get_iscsi_connections_done);
 }
 SPDK_RPC_REGISTER("get_iscsi_connections", spdk_rpc_get_iscsi_connections, SPDK_RPC_RUNTIME)
 
@@ -1474,3 +1476,77 @@ spdk_rpc_get_iscsi_auth_groups(struct spdk_jsonrpc_request *request,
 	spdk_jsonrpc_end_result(request, w);
 }
 SPDK_RPC_REGISTER("get_iscsi_auth_groups", spdk_rpc_get_iscsi_auth_groups, SPDK_RPC_RUNTIME)
+
+static const struct spdk_json_object_decoder rpc_set_iscsi_opts_decoders[] = {
+	{"auth_file", offsetof(struct spdk_iscsi_opts, authfile), spdk_json_decode_string, true},
+	{"node_base", offsetof(struct spdk_iscsi_opts, nodebase), spdk_json_decode_string, true},
+	{"nop_timeout", offsetof(struct spdk_iscsi_opts, timeout), spdk_json_decode_int32, true},
+	{"nop_in_interval", offsetof(struct spdk_iscsi_opts, nopininterval), spdk_json_decode_int32, true},
+	{"no_discovery_auth", offsetof(struct spdk_iscsi_opts, disable_chap), spdk_json_decode_bool, true},
+	{"req_discovery_auth", offsetof(struct spdk_iscsi_opts, require_chap), spdk_json_decode_bool, true},
+	{"req_discovery_auth_mutual", offsetof(struct spdk_iscsi_opts, mutual_chap), spdk_json_decode_bool, true},
+	{"discovery_auth_group", offsetof(struct spdk_iscsi_opts, chap_group), spdk_json_decode_int32, true},
+	{"disable_chap", offsetof(struct spdk_iscsi_opts, disable_chap), spdk_json_decode_bool, true},
+	{"require_chap", offsetof(struct spdk_iscsi_opts, require_chap), spdk_json_decode_bool, true},
+	{"mutual_chap", offsetof(struct spdk_iscsi_opts, mutual_chap), spdk_json_decode_bool, true},
+	{"chap_group", offsetof(struct spdk_iscsi_opts, chap_group), spdk_json_decode_int32, true},
+	{"max_sessions", offsetof(struct spdk_iscsi_opts, MaxSessions), spdk_json_decode_uint32, true},
+	{"max_queue_depth", offsetof(struct spdk_iscsi_opts, MaxQueueDepth), spdk_json_decode_uint32, true},
+	{"max_connections_per_session", offsetof(struct spdk_iscsi_opts, MaxConnectionsPerSession), spdk_json_decode_uint32, true},
+	{"default_time2wait", offsetof(struct spdk_iscsi_opts, DefaultTime2Wait), spdk_json_decode_uint32, true},
+	{"default_time2retain", offsetof(struct spdk_iscsi_opts, DefaultTime2Retain), spdk_json_decode_uint32, true},
+	{"first_burst_length", offsetof(struct spdk_iscsi_opts, FirstBurstLength), spdk_json_decode_uint32, true},
+	{"immediate_data", offsetof(struct spdk_iscsi_opts, ImmediateData), spdk_json_decode_bool, true},
+	{"error_recovery_level", offsetof(struct spdk_iscsi_opts, ErrorRecoveryLevel), spdk_json_decode_uint32, true},
+	{"allow_duplicated_isid", offsetof(struct spdk_iscsi_opts, AllowDuplicateIsid), spdk_json_decode_bool, true},
+	{"min_connections_per_core", offsetof(struct spdk_iscsi_opts, min_connections_per_core), spdk_json_decode_uint32, true},
+};
+
+static void
+spdk_rpc_set_iscsi_options(struct spdk_jsonrpc_request *request,
+			   const struct spdk_json_val *params)
+{
+	struct spdk_iscsi_opts *opts;
+	struct spdk_json_write_ctx *w;
+
+	if (g_spdk_iscsi_opts != NULL) {
+		SPDK_ERRLOG("this RPC must not be called more than once.\n");
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "Must not call more than once");
+		return;
+	}
+
+	opts = spdk_iscsi_opts_alloc();
+	if (opts == NULL) {
+		SPDK_ERRLOG("spdk_iscsi_opts_alloc() failed.\n");
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "Out of memory");
+		return;
+	}
+
+	if (params != NULL) {
+		if (spdk_json_decode_object(params, rpc_set_iscsi_opts_decoders,
+					    SPDK_COUNTOF(rpc_set_iscsi_opts_decoders), opts)) {
+			SPDK_ERRLOG("spdk_json_decode_object() failed\n");
+			spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INVALID_PARAMS,
+							 "Invalid parameters");
+			spdk_iscsi_opts_free(opts);
+			return;
+		}
+	}
+
+	g_spdk_iscsi_opts = spdk_iscsi_opts_copy(opts);
+	spdk_iscsi_opts_free(opts);
+
+	if (g_spdk_iscsi_opts == NULL) {
+		SPDK_ERRLOG("spdk_iscsi_opts_copy() failed\n");
+		spdk_jsonrpc_send_error_response(request, SPDK_JSONRPC_ERROR_INTERNAL_ERROR,
+						 "Out of memory");
+		return;
+	}
+
+	w = spdk_jsonrpc_begin_result(request);
+	spdk_json_write_bool(w, true);
+	spdk_jsonrpc_end_result(request, w);
+}
+SPDK_RPC_REGISTER("set_iscsi_options", spdk_rpc_set_iscsi_options, SPDK_RPC_STARTUP)

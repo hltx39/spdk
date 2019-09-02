@@ -28,8 +28,8 @@ def filter_methods(do_remove_global_rpcs):
         'set_nvmf_target_max_subsystems',
         'nvmf_create_transport',
         'set_bdev_options',
-        'set_bdev_nvme_options',
-        'set_bdev_nvme_hotplug',
+        'bdev_nvme_set_options',
+        'bdev_nvme_set_hotplug',
     ]
 
     data = json.loads(sys.stdin.read())

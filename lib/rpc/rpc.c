@@ -291,6 +291,7 @@ spdk_rpc_register_alias_deprecated(const char *method, const char *alias)
 
 	m->is_alias_of = base;
 	m->is_deprecated = true;
+	m->state_mask = base->state_mask;
 
 	/* TODO: use a hash table or sorted list */
 	SLIST_INSERT_HEAD(&g_rpc_methods, m, slist);
@@ -342,10 +343,12 @@ spdk_rpc_close(void)
 
 struct rpc_get_methods {
 	bool current;
+	bool include_aliases;
 };
 
 static const struct spdk_json_object_decoder rpc_get_methods_decoders[] = {
 	{"current", offsetof(struct rpc_get_methods, current), spdk_json_decode_bool, true},
+	{"include_aliases", offsetof(struct rpc_get_methods, include_aliases), spdk_json_decode_bool, true},
 };
 
 static void
@@ -368,6 +371,9 @@ spdk_rpc_get_methods(struct spdk_jsonrpc_request *request, const struct spdk_jso
 	w = spdk_jsonrpc_begin_result(request);
 	spdk_json_write_array_begin(w);
 	SLIST_FOREACH(m, &g_rpc_methods, slist) {
+		if (m->is_alias_of != NULL && !req.include_aliases) {
+			continue;
+		}
 		if (req.current && ((m->state_mask & g_rpc_state) != g_rpc_state)) {
 			continue;
 		}
@@ -391,26 +397,17 @@ spdk_rpc_get_spdk_version(struct spdk_jsonrpc_request *request, const struct spd
 	}
 
 	w = spdk_jsonrpc_begin_result(request);
-	if (w == NULL) {
-		return;
-	}
-
 	spdk_json_write_object_begin(w);
 
 	spdk_json_write_named_string_fmt(w, "version", "%s", SPDK_VERSION_STRING);
-
 	spdk_json_write_named_object_begin(w, "fields");
 	spdk_json_write_named_uint32(w, "major", SPDK_VERSION_MAJOR);
 	spdk_json_write_named_uint32(w, "minor", SPDK_VERSION_MINOR);
-
 	spdk_json_write_named_uint32(w, "patch", SPDK_VERSION_PATCH);
-
 	spdk_json_write_named_string_fmt(w, "suffix", "%s", SPDK_VERSION_SUFFIX);
-
 	spdk_json_write_object_end(w);
 
 	spdk_json_write_object_end(w);
-
 	spdk_jsonrpc_end_result(request, w);
 }
 SPDK_RPC_REGISTER("get_spdk_version", spdk_rpc_get_spdk_version,

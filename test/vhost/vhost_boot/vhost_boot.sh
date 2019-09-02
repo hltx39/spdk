@@ -7,7 +7,7 @@ source $rootdir/test/common/autotest_common.sh
 source $rootdir/test/vhost/common.sh
 source $rootdir/test/bdev/nbd_common.sh
 
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 vm_no="0"
 
 function err_clean
@@ -19,15 +19,15 @@ function err_clean
 	vm_kill_all
 	$rpc_py remove_vhost_scsi_target naa.vhost_vm.$vm_no 0
 	$rpc_py remove_vhost_controller naa.vhost_vm.$vm_no
-	$rpc_py destroy_lvol_bdev $lvb_u
-	$rpc_py destroy_lvol_store -u $lvs_u
-	vhost_kill
+	$rpc_py bdev_lvol_delete $lvb_u
+	$rpc_py bdev_lvol_delete_lvstore -u $lvs_u
+	vhost_kill 0
 	exit 1
 }
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Usage: $(basename $1) vm_image=PATH [-h|--help]"
 	echo "-h, --help            Print help and exit"
 	echo "    --vm_image=PATH   Path to VM image used in these tests"
@@ -61,7 +61,7 @@ vhosttestinit
 timing_enter vhost_boot
 trap 'err_clean "${FUNCNAME}" "${LINENO}"' ERR
 timing_enter start_vhost
-vhost_run
+vhost_run 0
 timing_exit start_vhost
 
 timing_enter create_lvol
@@ -74,17 +74,17 @@ if [[ $nvme_bdev_bs != 512 ]]; then
 	false
 fi
 
-lvs_u=$($rpc_py construct_lvol_store Nvme0n1 lvs0)
-lvb_u=$($rpc_py construct_lvol_bdev -u $lvs_u lvb0 20000)
+lvs_u=$($rpc_py bdev_lvol_create_lvstore Nvme0n1 lvs0)
+lvb_u=$($rpc_py bdev_lvol_create -u $lvs_u lvb0 20000)
 timing_exit create_lvol
 
 timing_enter convert_vm_image
 modprobe nbd
-trap 'nbd_stop_disks $(get_vhost_dir)/rpc.sock /dev/nbd0; err_clean "${FUNCNAME}" "${LINENO}"' ERR
-nbd_start_disks "$(get_vhost_dir)/rpc.sock" $lvb_u /dev/nbd0
+trap 'nbd_stop_disks $(get_vhost_dir 0)/rpc.sock /dev/nbd0; err_clean "${FUNCNAME}" "${LINENO}"' ERR
+nbd_start_disks "$(get_vhost_dir 0)/rpc.sock" $lvb_u /dev/nbd0
 qemu-img convert $os_image -O raw /dev/nbd0
 sync
-nbd_stop_disks $(get_vhost_dir)/rpc.sock /dev/nbd0
+nbd_stop_disks $(get_vhost_dir 0)/rpc.sock /dev/nbd0
 sleep 1
 timing_exit convert_vm_image
 
@@ -117,9 +117,9 @@ vm_shutdown_all
 timing_enter clean_vhost
 $rpc_py remove_vhost_scsi_target naa.vhost_vm.$vm_no 0
 $rpc_py remove_vhost_controller naa.vhost_vm.$vm_no
-$rpc_py destroy_lvol_bdev $lvb_u
-$rpc_py destroy_lvol_store -u $lvs_u
-vhost_kill
+$rpc_py bdev_lvol_delete $lvb_u
+$rpc_py bdev_lvol_delete_lvstore -u $lvs_u
+vhost_kill 0
 timing_exit clean_vhost
 
 timing_exit vhost_boot

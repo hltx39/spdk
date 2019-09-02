@@ -5,7 +5,7 @@ rootdir=$(readlink -f $testdir/../../..)
 source $rootdir/test/common/autotest_common.sh
 source $rootdir/test/vhost/common.sh
 
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 ctrl_type="spdk_vhost_scsi"
 ssh_pass=""
 vm_num="0"
@@ -13,7 +13,7 @@ vm_image="/home/sys_sgsw/windows_server.qcow2"
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Windows Server automated test"
 	echo "Usage: $(basename $1) [OPTIONS]"
 	echo "--vm-ssh-pass=PASSWORD    Text password for the VM"
@@ -84,7 +84,7 @@ vm_kill_all
 # Violating this rule doesn't cause any issues for SPDK vhost,
 # but triggers an assert, so we can only run Windows VMs with non-debug SPDK builds.
 notice "running SPDK vhost"
-vhost_run
+vhost_run 0
 notice "..."
 
 # Prepare bdevs for later vhost controllers use
@@ -95,8 +95,8 @@ notice "..."
 # TODO: use a param for blocksize for AIO and Malloc bdevs
 aio_file="$testdir/aio_disk"
 dd if=/dev/zero of=$aio_file bs=1M count=512
-$rpc_py construct_aio_bdev $aio_file Aio0 512
-$rpc_py construct_malloc_bdev -b Malloc0 256 512
+$rpc_py bdev_aio_create $aio_file Aio0 512
+$rpc_py bdev_malloc_create -b Malloc0 256 512
 $rpc_py get_bdevs
 
 # Construct vhost controllers
@@ -132,6 +132,6 @@ notice "Shutting down Windows VM..."
 vm_kill $vm_num
 
 notice "Shutting down SPDK vhost app..."
-vhost_kill
+vhost_kill 0
 
 rm -f $aio_file

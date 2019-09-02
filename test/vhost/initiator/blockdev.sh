@@ -12,7 +12,7 @@ virtio_with_unmap=""
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Script for running vhost initiator tests."
 	echo "Usage: $(basename $1) [-h|--help] [--fiobin=PATH]"
 	echo "-h, --help            Print help and exit"
@@ -37,7 +37,7 @@ vhosttestinit
 
 source $testdir/autotest.config
 PLUGIN_DIR=$rootdir/examples/bdev/fio_plugin
-RPC_PY="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+RPC_PY="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 if [ ! -x $FIO_PATH ]; then
 	error "Invalid path of fio binary"
@@ -50,6 +50,7 @@ fi
 
 trap 'rm -f *.state $rootdir/spdk.tar.gz $rootdir/fio.tar.gz $(get_vhost_dir)/Virtio0;\
  error_exit "${FUNCNAME}""${LINENO}"' ERR SIGTERM SIGABRT
+
 function run_spdk_fio() {
 	fio_bdev --ioengine=spdk_bdev "$@" --spdk_mem=1024 --spdk_single_seg=1
 }
@@ -73,11 +74,11 @@ function create_bdev_config()
 	$RPC_PY construct_vhost_blk_controller naa.Nvme0n1_blk0.0 Nvme0n1p4
 	$RPC_PY construct_vhost_blk_controller naa.Nvme0n1_blk1.0 Nvme0n1p5
 
-	$RPC_PY construct_malloc_bdev 128 512 --name Malloc0
+	$RPC_PY bdev_malloc_create 128 512 --name Malloc0
 	$RPC_PY construct_vhost_scsi_controller naa.Malloc0.0
 	$RPC_PY add_vhost_scsi_lun naa.Malloc0.0 0 Malloc0
 
-	$RPC_PY construct_malloc_bdev 128 4096 --name Malloc1
+	$RPC_PY bdev_malloc_create 128 4096 --name Malloc1
 	$RPC_PY construct_vhost_scsi_controller naa.Malloc1.0
 	$RPC_PY add_vhost_scsi_lun naa.Malloc1.0 0 Malloc1
 
@@ -88,7 +89,7 @@ function create_bdev_config()
 }
 
 timing_enter vhost_run
-vhost_run
+vhost_run 0
 timing_exit vhost_run
 
 timing_enter create_bdev_config
@@ -109,7 +110,7 @@ timing_exit run_spdk_fio_unmap
 $RPC_PY delete_nvme_controller Nvme0
 
 timing_enter vhost_kill
-vhost_kill
+vhost_kill 0
 timing_exit vhost_kill
 
 vhosttestfini

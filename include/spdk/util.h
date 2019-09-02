@@ -57,6 +57,13 @@ extern "C" {
 /* Ceiling division of unsigned integers */
 #define SPDK_CEIL_DIV(x,y) (((x)+(y)-1)/(y))
 
+/* The following will automatically generate several version of
+ * this function, targeted at different architectures. This
+ * is only supported by GCC 6 or newer. */
+#if defined(__GNUC__) && __GNUC__ >= 6 && !defined(__clang__) \
+	&& (defined(__i386__) || defined(__x86_64__))
+__attribute__((target_clones("bmi", "arch=core2", "arch=atom", "default")))
+#endif
 static inline uint32_t
 spdk_u32log2(uint32_t x)
 {
@@ -73,6 +80,13 @@ spdk_align32pow2(uint32_t x)
 	return 1u << (1 + spdk_u32log2(x - 1));
 }
 
+/* The following will automatically generate several version of
+ * this function, targeted at different architectures. This
+ * is only supported by GCC 6 or newer. */
+#if defined(__GNUC__) && __GNUC__ >= 6 && !defined(__clang__) \
+	&& (defined(__i386__) || defined(__x86_64__))
+__attribute__((target_clones("bmi", "arch=core2", "arch=atom", "default")))
+#endif
 static inline uint64_t
 spdk_u64log2(uint64_t x)
 {
@@ -107,6 +121,23 @@ spdk_divide_round_up(uint64_t num, uint64_t divisor)
 {
 	return (num + divisor - 1) / divisor;
 }
+
+
+/**
+ * Scan build is really pessimistic and assumes that mempool functions can
+ * dequeue NULL buffers even if they return success. This is obviously a false
+ * possitive, but the mempool dequeue can be done in a DPDK inline function that
+ * we can't decorate with usual assert(buf != NULL). Instead, we'll
+ * preinitialize the dequeued buffer array with some dummy objects.
+ */
+#define SPDK_CLANG_ANALYZER_PREINIT_PTR_ARRAY(arr, arr_size, buf_size) \
+	do { \
+		static char dummy_buf[buf_size]; \
+		int i; \
+		for (i = 0; i < arr_size; i++) { \
+			arr[i] = (void *)dummy_buf; \
+		} \
+	} while (0)
 
 #ifdef __cplusplus
 }

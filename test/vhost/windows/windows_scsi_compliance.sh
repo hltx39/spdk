@@ -14,11 +14,11 @@ aio_file="$testdir/aio_disk"
 ssh_pass=""
 vm_num=1
 keep_results_dir=false
-rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir)/rpc.sock"
+rpc_py="$rootdir/scripts/rpc.py -s $(get_vhost_dir 0)/rpc.sock"
 
 function usage()
 {
-	[[ ! -z $2 ]] && ( echo "$2"; echo ""; )
+	[[ -n $2 ]] && ( echo "$2"; echo ""; )
 	echo "Windows Server scsi compliance test"
 	echo "Usage: $(basename $1) [OPTIONS]"
 	echo "  --vm-ssh-pass=PASSWORD    Text password for the VM"
@@ -43,16 +43,17 @@ while getopts 'h-:' optchar; do
 	esac
 done
 
-trap "rm -f $aio_file; rm -rf $testdir/results; error_exit" SIGINT SIGTERM ERR
+trap 'rm -f $aio_file; rm -rf $testdir/results; error_exit' SIGINT SIGTERM ERR
 
+VM_PASSWORD="$ssh_pass"
 mkdir -p $testdir/results
 dd if=/dev/zero of=$aio_file bs=1M count=512
 
 timing_enter vhost_run
-vhost_run
-$rpc_py set_bdev_nvme_hotplug -e
-$rpc_py construct_malloc_bdev 256 4096 -b Malloc0
-$rpc_py construct_aio_bdev $aio_file Aio0 512
+vhost_run 0
+$rpc_py bdev_nvme_set_hotplug -e
+$rpc_py bdev_malloc_create 256 4096 -b Malloc0
+$rpc_py bdev_aio_create $aio_file Aio0 512
 $rpc_py get_bdevs
 $rpc_py construct_vhost_scsi_controller naa.vhost.1
 $rpc_py add_vhost_scsi_lun naa.vhost.1 0 Nvme0n1
@@ -76,7 +77,7 @@ dos2unix $testdir/results/WIN_SCSI_*.log
 notice "Kill vm 1"
 vm_kill "$vm_num"
 notice "Kill spdk"
-vhost_kill
+vhost_kill 0
 notice "Remove $aio_file"
 rm -f $aio_file
 

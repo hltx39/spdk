@@ -654,7 +654,7 @@ enum spdk_nvme_command_specific_status_code {
 
 	SPDK_NVME_SC_CONFLICTING_ATTRIBUTES		= 0x80,
 	SPDK_NVME_SC_INVALID_PROTECTION_INFO		= 0x81,
-	SPDK_NVME_SC_ATTEMPTED_WRITE_TO_RO_PAGE		= 0x82,
+	SPDK_NVME_SC_ATTEMPTED_WRITE_TO_RO_RANGE	= 0x82,
 };
 
 /**
@@ -2521,7 +2521,7 @@ struct spdk_nvme_sanitize {
 	/* reserved */
 	uint32_t reserved	: 22;
 };
-SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_format) == 4, "Incorrect size");
+SPDK_STATIC_ASSERT(sizeof(struct spdk_nvme_sanitize) == 4, "Incorrect size");
 
 /* Sanitize Action */
 enum spdk_sanitize_action {

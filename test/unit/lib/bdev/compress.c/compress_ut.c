@@ -32,7 +32,8 @@
  */
 
 #include "spdk_cunit.h"
-
+/* We have our own mock for this */
+#define UNIT_TEST_NO_VTOPHYS
 #include "common/lib/test_env.c"
 #include "spdk_internal/mock.h"
 #include "unit/lib/json_mock.c"
@@ -47,10 +48,10 @@ struct vbdev_compress g_comp_bdev;
 struct comp_device_qp g_device_qp;
 struct compress_dev g_device;
 struct rte_compressdev_capabilities g_cdev_cap;
-static struct rte_mbuf *g_src_mbufs[2];
-static struct rte_mbuf *g_dst_mbufs[2];
-static struct rte_mbuf g_expected_src_mbufs[2];
-static struct rte_mbuf g_expected_dst_mbufs[2];
+static struct rte_mbuf *g_src_mbufs[3];
+static struct rte_mbuf *g_dst_mbufs[3];
+static struct rte_mbuf g_expected_src_mbufs[3];
+static struct rte_mbuf g_expected_dst_mbufs[3];
 struct comp_bdev_io *g_io_ctx;
 struct comp_io_channel *g_comp_ch;
 struct rte_config *g_test_config;
@@ -85,7 +86,11 @@ static inline int mock_rte_pktmbuf_chain(struct rte_mbuf *head, struct rte_mbuf 
 #define rte_pktmbuf_chain mock_rte_pktmbuf_chain
 static inline int mock_rte_pktmbuf_chain(struct rte_mbuf *head, struct rte_mbuf *tail)
 {
-	head->next = tail;
+	struct rte_mbuf *cur_tail;
+
+	cur_tail = rte_pktmbuf_lastseg(head);
+	cur_tail->next = tail;
+
 	return 0;
 }
 
@@ -176,15 +181,24 @@ int mock_rte_pktmbuf_alloc_bulk(struct rte_mempool *pool, struct rte_mbuf **mbuf
 int mock_rte_pktmbuf_alloc_bulk(struct rte_mempool *pool, struct rte_mbuf **mbufs,
 				unsigned count)
 {
-	/* This mocked function only supports the alloc of 2 src and 2 dst. */
-	CU_ASSERT(count == 2);
+	int i;
+
+	/* This mocked function only supports the alloc of up to 3 src and 3 dst. */
 	ut_rte_pktmbuf_alloc_bulk += count;
-	if (ut_rte_pktmbuf_alloc_bulk == 2) {
+
+	for (i = 0; i < 3; i++) {
+		g_src_mbufs[i]->next = NULL;
+		g_dst_mbufs[i]->next = NULL;
+	}
+
+	if (ut_rte_pktmbuf_alloc_bulk == 3) {
 		*mbufs++ = g_src_mbufs[0];
-		*mbufs = g_src_mbufs[1];
-	} else if (ut_rte_pktmbuf_alloc_bulk == 4) {
+		*mbufs++ = g_src_mbufs[1];
+		*mbufs = g_src_mbufs[2];
+	} else if (ut_rte_pktmbuf_alloc_bulk == 6) {
 		*mbufs++ = g_dst_mbufs[0];
-		*mbufs = g_dst_mbufs[1];
+		*mbufs++ = g_dst_mbufs[1];
+		*mbufs = g_dst_mbufs[2];
 		ut_rte_pktmbuf_alloc_bulk = 0;
 	} else {
 		return -1;
@@ -270,6 +284,12 @@ DEFINE_STUB(rte_eal_get_configuration, struct rte_config *, (void), NULL);
 DEFINE_STUB(rte_vdev_init, int, (const char *name, const char *args), 0);
 DEFINE_STUB_V(rte_comp_op_free, (struct rte_comp_op *op));
 DEFINE_STUB(rte_comp_op_alloc, struct rte_comp_op *, (struct rte_mempool *mempool), NULL);
+
+uint64_t
+spdk_vtophys(void *buf, uint64_t *size)
+{
+	return (uint64_t)buf;
+}
 
 void
 spdk_bdev_io_get_buf(struct spdk_bdev_io *bdev_io, spdk_bdev_io_get_buf_cb cb, uint64_t len)
@@ -395,6 +415,8 @@ rte_compressdev_enqueue_burst(uint8_t dev_id, uint16_t qp_id, struct rte_comp_op
 	 * to indirectly test functionality in the code under test.
 	 */
 	CU_ASSERT(op->m_src->buf_addr == ut_expected_op.m_src->buf_addr);
+	CU_ASSERT(op->m_src->next->buf_addr == ut_expected_op.m_src->next->buf_addr);
+	CU_ASSERT(op->m_src->next->next->buf_addr == ut_expected_op.m_src->next->next->buf_addr);
 	CU_ASSERT(op->m_src->buf_iova == ut_expected_op.m_src->buf_iova);
 	CU_ASSERT(op->m_src->buf_len == ut_expected_op.m_src->buf_len);
 	CU_ASSERT(op->m_src->pkt_len == ut_expected_op.m_src->pkt_len);
@@ -404,6 +426,8 @@ rte_compressdev_enqueue_burst(uint8_t dev_id, uint16_t qp_id, struct rte_comp_op
 
 	/* check dst mbuf values */
 	CU_ASSERT(op->m_dst->buf_addr == ut_expected_op.m_dst->buf_addr);
+	CU_ASSERT(op->m_dst->next->buf_addr == ut_expected_op.m_dst->next->buf_addr);
+	CU_ASSERT(op->m_dst->next->next->buf_addr == ut_expected_op.m_dst->next->next->buf_addr);
 	CU_ASSERT(op->m_dst->buf_iova == ut_expected_op.m_dst->buf_iova);
 	CU_ASSERT(op->m_dst->buf_len == ut_expected_op.m_dst->buf_len);
 	CU_ASSERT(op->m_dst->pkt_len == ut_expected_op.m_dst->pkt_len);
@@ -416,10 +440,6 @@ rte_compressdev_enqueue_burst(uint8_t dev_id, uint16_t qp_id, struct rte_comp_op
 static int
 test_setup(void)
 {
-	g_mbuf_mp = rte_pktmbuf_pool_create("mbuf_mp", NUM_MBUFS, POOL_CACHE_SIZE,
-					    sizeof(struct rte_mbuf), 0, rte_socket_id());
-	assert(g_mbuf_mp != NULL);
-
 	g_comp_bdev.backing_dev.unmap = _comp_reduce_unmap;
 	g_comp_bdev.backing_dev.readv = _comp_reduce_readv;
 	g_comp_bdev.backing_dev.writev = _comp_reduce_writev;
@@ -462,8 +482,10 @@ test_setup(void)
 
 	g_src_mbufs[0] = calloc(1, sizeof(struct rte_mbuf));
 	g_src_mbufs[1] = calloc(1, sizeof(struct rte_mbuf));
+	g_src_mbufs[2] = calloc(1, sizeof(struct rte_mbuf));
 	g_dst_mbufs[0] = calloc(1, sizeof(struct rte_mbuf));
 	g_dst_mbufs[1] = calloc(1, sizeof(struct rte_mbuf));
+	g_dst_mbufs[2] = calloc(1, sizeof(struct rte_mbuf));
 
 	g_bdev_io = calloc(1, sizeof(struct spdk_bdev_io) + sizeof(struct comp_bdev_io));
 	g_bdev_io->u.bdev.iovs = calloc(128, sizeof(struct iovec));
@@ -486,11 +508,12 @@ test_setup(void)
 static int
 test_cleanup(void)
 {
-	spdk_mempool_free((struct spdk_mempool *)g_mbuf_mp);
 	free(g_dst_mbufs[0]);
 	free(g_src_mbufs[0]);
 	free(g_dst_mbufs[1]);
 	free(g_src_mbufs[1]);
+	free(g_dst_mbufs[2]);
+	free(g_src_mbufs[2]);
 	free(g_bdev_io->u.bdev.iovs);
 	free(g_bdev_io);
 	free(g_io_ch);
@@ -501,26 +524,21 @@ test_cleanup(void)
 static void
 test_compress_operation(void)
 {
-	struct iovec src_iovs[2] = {};
+	struct iovec src_iovs[3] = {};
 	int src_iovcnt;
-	struct iovec dst_iovs[2] = {};
+	struct iovec dst_iovs[3] = {};
 	int dst_iovcnt;
 	struct spdk_reduce_vol_cb_args cb_arg;
-	int rc;
+	int rc, i;
 	struct vbdev_comp_op *op;
 
-	src_iovcnt = dst_iovcnt = 2;
-	src_iovs[0].iov_len = 1024 * 4;
-	dst_iovs[0].iov_len = 1024 * 4;
-
-	src_iovs[1].iov_len = 1024 * 2;
-	dst_iovs[1].iov_len = 1024 * 2;
-
-	src_iovs[0].iov_base = (void *)0xfeedbeef;
-	dst_iovs[0].iov_base = (void *)0xdeadbeef;
-
-	src_iovs[1].iov_base = (void *)0xdeadbeef;
-	dst_iovs[1].iov_base = (void *)0xfeedbeef;
+	src_iovcnt = dst_iovcnt = 3;
+	for (i = 0; i < dst_iovcnt; i++) {
+		src_iovs[i].iov_len = 0x1000;
+		dst_iovs[i].iov_len = 0x1000;
+		src_iovs[i].iov_base = (void *)0x10000000 + 0x1000 * i;
+		dst_iovs[i].iov_base = (void *)0x20000000 + 0x1000 * i;
+	}
 
 	/* test rte_comp_op_alloc failure */
 	MOCK_SET(rte_comp_op_alloc, NULL);
@@ -567,15 +585,21 @@ test_compress_operation(void)
 	CU_ASSERT(rc == 0);
 	ut_enqueue_value = 1;
 
-	/* test success with 2 vector iovec */
+	/* test success with 3 vector iovec */
 	ut_expected_op.private_xform = &g_decomp_xform;
 	ut_expected_op.src.offset = 0;
-	ut_expected_op.src.length = src_iovs[0].iov_len + src_iovs[1].iov_len;
+	ut_expected_op.src.length = src_iovs[0].iov_len + src_iovs[1].iov_len + src_iovs[2].iov_len;
 	ut_expected_op.m_src = &g_expected_src_mbufs[0];
 	ut_expected_op.m_src->buf_addr = src_iovs[0].iov_base;
+	ut_expected_op.m_src->buf_iova = spdk_vtophys(src_iovs[0].iov_base, &src_iovs[0].iov_len);
 	ut_expected_op.m_src->next = &g_expected_src_mbufs[1];
 	ut_expected_op.m_src->next->buf_addr = src_iovs[1].iov_base;
-	ut_expected_op.m_src->buf_iova = spdk_vtophys((void *)ut_expected_op.m_src->buf_addr, NULL);
+	ut_expected_op.m_src->next->buf_iova = spdk_vtophys(src_iovs[1].iov_base, &src_iovs[1].iov_len);
+	ut_expected_op.m_src->next->next = &g_expected_src_mbufs[2];
+	ut_expected_op.m_src->next->next->buf_addr = src_iovs[2].iov_base;
+	ut_expected_op.m_src->next->next->buf_iova = spdk_vtophys(src_iovs[2].iov_base,
+			&src_iovs[2].iov_len);
+
 	ut_expected_op.m_src->buf_len = src_iovs[0].iov_len;
 	ut_expected_op.m_src->pkt_len = src_iovs[0].iov_len;
 	ut_expected_op.m_src->userdata = &cb_arg;
@@ -583,9 +607,15 @@ test_compress_operation(void)
 	ut_expected_op.dst.offset = 0;
 	ut_expected_op.m_dst = &g_expected_dst_mbufs[0];
 	ut_expected_op.m_dst->buf_addr = dst_iovs[0].iov_base;
+	ut_expected_op.m_dst->buf_iova = spdk_vtophys(dst_iovs[0].iov_base, &dst_iovs[0].iov_len);
 	ut_expected_op.m_dst->next = &g_expected_dst_mbufs[1];
 	ut_expected_op.m_dst->next->buf_addr = dst_iovs[1].iov_base;
-	ut_expected_op.m_dst->buf_iova = spdk_vtophys((void *)ut_expected_op.m_dst->buf_addr, NULL);
+	ut_expected_op.m_dst->next->buf_iova = spdk_vtophys(dst_iovs[1].iov_base, &dst_iovs[1].iov_len);
+	ut_expected_op.m_dst->next->next = &g_expected_dst_mbufs[2];
+	ut_expected_op.m_dst->next->next->buf_addr = dst_iovs[2].iov_base;
+	ut_expected_op.m_dst->next->next->buf_iova = spdk_vtophys(dst_iovs[2].iov_base,
+			&dst_iovs[2].iov_len);
+
 	ut_expected_op.m_dst->buf_len = dst_iovs[0].iov_len;
 	ut_expected_op.m_dst->pkt_len = dst_iovs[0].iov_len;
 
@@ -600,10 +630,11 @@ test_poller(void)
 {
 	int rc;
 	struct spdk_reduce_vol_cb_args *cb_args;
-	struct rte_mbuf mbuf[2];
+	struct rte_mbuf mbuf[4];
 	struct vbdev_comp_op *op_to_queue;
-	struct iovec src_iovs[2] = {};
-	struct iovec dst_iovs[2] = {};
+	struct iovec src_iovs[3] = {};
+	struct iovec dst_iovs[3] = {};
+	int i;
 
 	cb_args = calloc(1, sizeof(*cb_args));
 	SPDK_CU_ASSERT_FATAL(cb_args != NULL);
@@ -611,6 +642,14 @@ test_poller(void)
 	memset(&g_comp_op[0], 0, sizeof(struct rte_comp_op));
 	g_comp_op[0].m_src = &mbuf[0];
 	g_comp_op[1].m_src = &mbuf[1];
+	g_comp_op[0].m_dst = &mbuf[2];
+	g_comp_op[1].m_dst = &mbuf[3];
+	for (i = 0; i < 3; i++) {
+		src_iovs[i].iov_len = 0x1000;
+		dst_iovs[i].iov_len = 0x1000;
+		src_iovs[i].iov_base = (void *)0x10000000 + 0x1000 * i;
+		dst_iovs[i].iov_base = (void *)0x20000000 + 0x1000 * i;
+	}
 
 	/* Error from dequeue, nothing needing to be resubmitted.
 	 */
@@ -659,9 +698,9 @@ test_poller(void)
 	SPDK_CU_ASSERT_FATAL(op_to_queue != NULL);
 	op_to_queue->backing_dev = &g_comp_bdev.backing_dev;
 	op_to_queue->src_iovs = &src_iovs[0];
-	op_to_queue->src_iovcnt = 2;
+	op_to_queue->src_iovcnt = 3;
 	op_to_queue->dst_iovs = &dst_iovs[0];
-	op_to_queue->dst_iovcnt = 2;
+	op_to_queue->dst_iovcnt = 3;
 	op_to_queue->compress = true;
 	op_to_queue->cb_arg = cb_args;
 	ut_enqueue_value = FAKE_ENQUEUE_SUCCESS;
@@ -735,12 +774,6 @@ static void
 test_initdrivers(void)
 {
 	int rc;
-	static struct rte_mempool *orig_mbuf_mp;
-	struct comp_device_qp *dev_qp;
-	struct comp_device_qp *tmp_qp;
-
-	orig_mbuf_mp = g_mbuf_mp;
-	g_mbuf_mp = NULL;
 
 	/* test return values from rte_vdev_init() */
 	MOCK_SET(rte_eal_get_configuration, g_test_config);
@@ -753,6 +786,7 @@ test_initdrivers(void)
 	MOCK_SET(rte_vdev_init, 0);
 	rc = vbdev_init_compress_drivers();
 	CU_ASSERT(rc == 0);
+	spdk_mempool_free((struct spdk_mempool *)g_mbuf_mp);
 
 	/* error */
 	MOCK_SET(rte_vdev_init, -2);
@@ -819,14 +853,6 @@ test_initdrivers(void)
 	ut_rte_compressdev_private_xform_create = 0;
 	rc = vbdev_init_compress_drivers();
 	CU_ASSERT(rc == 0);
-
-	TAILQ_FOREACH_SAFE(dev_qp, &g_comp_device_qp, link, tmp_qp) {
-		TAILQ_REMOVE(&g_comp_device_qp, dev_qp, link);
-		free(dev_qp->device);
-		free(dev_qp);
-	}
-
-	g_mbuf_mp = orig_mbuf_mp;
 }
 
 static void

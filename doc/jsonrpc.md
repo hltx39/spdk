@@ -283,35 +283,35 @@ Example response:
     "construct_virtio_dev",
     "get_virtio_scsi_devs",
     "remove_virtio_bdev",
-    "delete_aio_bdev",
-    "construct_aio_bdev",
+    "bdev_aio_delete",
+    "bdev_aio_create",
     "destruct_split_vbdev",
     "construct_split_vbdev",
-    "bdev_inject_error",
-    "delete_error_bdev",
-    "construct_error_bdev",
+    "bdev_error_inject_error",
+    "bdev_error_delete",
+    "bdev_error_create",
     "construct_passthru_bdev",
-    "apply_nvme_firmware",
+    "bdev_nvme_apply_firmware",
     "delete_nvme_controller",
     "construct_nvme_bdev",
-    "construct_null_bdev",
+    "bdev_null_create",
     "delete_malloc_bdev",
-    "construct_malloc_bdev",
+    "bdev_malloc_create",
     "delete_ftl_bdev",
     "construct_ftl_bdev",
-    "get_lvol_stores",
-    "destroy_lvol_bdev",
-    "resize_lvol_bdev",
-    "set_read_only_lvol_bdev",
-    "decouple_parent_lvol_bdev",
-    "inflate_lvol_bdev",
-    "rename_lvol_bdev",
-    "clone_lvol_bdev",
-    "snapshot_lvol_bdev",
-    "construct_lvol_bdev",
-    "destroy_lvol_store",
-    "rename_lvol_store",
-    "construct_lvol_store"
+    "bdev_lvol_get_lvstores",
+    "bdev_lvol_delete",
+    "bdev_lvol_resize",
+    "bdev_lvol_set_read_only",
+    "bdev_lvol_decouple_parent",
+    "bdev_lvol_inflate",
+    "bdev_lvol_rename",
+    "bdev_lvol_clone",
+    "bdev_lvol_snapshot",
+    "bdev_lvol_create",
+    "bdev_lvol_delete_lvstore",
+    "bdev_lvol_rename_lvstore",
+    "bdev_lvol_create_lvstore"
   ]
 }
 ~~~
@@ -469,7 +469,7 @@ Example response:
         "name": "Malloc0",
         "uuid": "913fc008-79a7-447f-b2c4-c73543638c31"
       },
-      "method": "construct_malloc_bdev"
+      "method": "bdev_malloc_create"
     },
     {
       "params": {
@@ -478,7 +478,7 @@ Example response:
         "name": "Malloc1",
         "uuid": "dd5b8f6e-b67a-4506-b606-7fff5a859920"
       },
-      "method": "construct_malloc_bdev"
+      "method": "bdev_malloc_create"
     }
   ]
 }
@@ -816,7 +816,7 @@ Example response:
 }
 ~~~
 
-## construct_ocf_bdev {#rpc_construct_ocf_bdev}
+## bdev_ocf_create {#rpc_bdev_ocf_create}
 
 Construct new OCF bdev.
 Command accepts cache mode that is going to be used.
@@ -848,7 +848,7 @@ Example request:
     "core_bdev_name": "aio0"
   },
   "jsonrpc": "2.0",
-  "method": "construct_ocf_bdev",
+  "method": "bdev_ocf_create",
   "id": 1
 }
 ~~~
@@ -863,7 +863,7 @@ Example response:
 }
 ~~~
 
-## delete_ocf_bdev {#rpc_delete_ocf_bdev}
+## bdev_ocf_delete {#rpc_bdev_ocf_delete}
 
 Delete the OCF bdev
 
@@ -883,7 +883,7 @@ Example request:
     "name": "ocf0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_ocf_bdev",
+  "method": "bdev_ocf_delete",
   "id": 1
 }
 ~~~
@@ -898,7 +898,7 @@ Example response:
 }
 ~~~
 
-## get_ocf_stats {#rpc_get_ocf_stats}
+## bdev_ocf_get_stats {#rpc_bdev_ocf_get_stats}
 
 Get statistics of chosen OCF block device.
 
@@ -919,7 +919,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "get_ocf_stats",
+  "method": "bdev_ocf_get_stats",
   "id": 1
 }
 ~~~
@@ -1102,7 +1102,7 @@ Example response:
 }
 ~~~
 
-## get_ocf_bdevs {#rpc_get_ocf_bdevs}
+## bdev_ocf_get_bdevs {#rpc_bdev_ocf_get_bdevs}
 
 Get list of OCF devices including unregistered ones.
 
@@ -1123,7 +1123,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "get_ocf_bdevs",
+  "method": "bdev_ocf_get_bdevs",
   "id": 1
 }
 ~~~
@@ -1151,7 +1151,7 @@ Example response:
 }
 ~~~
 
-## construct_malloc_bdev {#rpc_construct_malloc_bdev}
+## bdev_malloc_create {#rpc_bdev_malloc_create}
 
 Construct @ref bdev_config_malloc
 
@@ -1181,7 +1181,7 @@ Example request:
     "uuid": "2b6601ba-eada-44fb-9a83-a20eb9eb9e90"
   },
   "jsonrpc": "2.0",
-  "method": "construct_malloc_bdev",
+  "method": "bdev_malloc_create",
   "id": 1
 }
 ~~~
@@ -1231,7 +1231,7 @@ Example response:
 }
 ~~~
 
-## construct_null_bdev {#rpc_construct_null_bdev}
+## bdev_null_create {#rpc_bdev_null_create}
 
 Construct @ref bdev_config_null
 
@@ -1243,6 +1243,9 @@ name                    | Optional | string      | Bdev name to use
 block_size              | Required | number      | Block size in bytes
 num_blocks              | Required | number      | Number of blocks
 uuid                    | Optional | string      | UUID of new bdev
+md_size                 | Optional | number      | Metadata size in bytes
+dif_type                | Optional | number      | Protection information type (0, 1, 2 or 3). Default: 0 - no protection.
+dif_is_head_of_md       | Optional | boolean     | Protection information is in the first 8 bytes of MD. Default: in the last 8 bytes.
 
 ### Result
 
@@ -1255,13 +1258,16 @@ Example request:
 ~~~
 {
   "params": {
-    "block_size": 4096,
+    "block_size": 4104,
     "num_blocks": 16384,
     "name": "Null0",
-    "uuid": "2b6601ba-eada-44fb-9a83-a20eb9eb9e90"
+    "uuid": "2b6601ba-eada-44fb-9a83-a20eb9eb9e90",
+    "md_size": 8,
+    "dif_type": 1,
+    "dif_is_head_of_md": true
   },
   "jsonrpc": "2.0",
-  "method": "construct_null_bdev",
+  "method": "bdev_null_create",
   "id": 1
 }
 ~~~
@@ -1276,7 +1282,7 @@ Example response:
 }
 ~~~
 
-## delete_null_bdev {#rpc_delete_null_bdev}
+## bdev_null_delete {#rpc_bdev_null_delete}
 
 Delete @ref bdev_config_null.
 
@@ -1296,7 +1302,7 @@ Example request:
     "name": "Null0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_null_bdev",
+  "method": "bdev_null_delete",
   "id": 1
 }
 ~~~
@@ -1311,7 +1317,7 @@ Example response:
 }
 ~~~
 
-## construct_aio_bdev {#rpc_construct_aio_bdev}
+## bdev_aio_create {#rpc_bdev_aio_create}
 
 Construct @ref bdev_config_aio.
 
@@ -1339,7 +1345,7 @@ Example request:
     "filename": "/tmp/aio_bdev_file"
   },
   "jsonrpc": "2.0",
-  "method": "construct_aio_bdev",
+  "method": "bdev_aio_create",
   "id": 1
 }
 ~~~
@@ -1354,7 +1360,7 @@ Example response:
 }
 ~~~
 
-## delete_aio_bdev {#rpc_delete_aio_bdev}
+## bdev_aio_delete {#rpc_bdev_aio_delete}
 
 Delete @ref bdev_config_aio.
 
@@ -1374,7 +1380,7 @@ Example request:
     "name": "Aio0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_aio_bdev",
+  "method": "bdev_aio_delete",
   "id": 1
 }
 ~~~
@@ -1389,7 +1395,7 @@ Example response:
 }
 ~~~
 
-## set_bdev_nvme_options {#rpc_set_bdev_nvme_options}
+## bdev_nvme_set_options {#rpc_bdev_nvme_set_options}
 
 Set global parameters for all bdev NVMe. This RPC may only be called before SPDK subsystems have been initialized.
 
@@ -1419,7 +1425,7 @@ request:
     "io_queue_requests" : 2048,
   },
   "jsonrpc": "2.0",
-  "method": "set_bdev_nvme_options",
+  "method": "bdev_nvme_set_options",
   "id": 1
 }
 ~~~
@@ -1434,7 +1440,7 @@ Example response:
 }
 ~~~
 
-## set_bdev_nvme_hotplug {#rpc_set_bdev_nvme_hotplug}
+## bdev_nvme_set_hotplug {#rpc_bdev_nvme_set_hotplug}
 
 Change settings of the NVMe hotplug feature. If enabled, PCIe NVMe bdevs will be automatically discovered on insertion
 and deleted on removal.
@@ -1458,7 +1464,7 @@ request:
     "period_us": 2000
   },
   "jsonrpc": "2.0",
-  "method": "set_bdev_nvme_hotplug",
+  "method": "bdev_nvme_set_hotplug",
   "id": 1
 }
 ~~~
@@ -1526,7 +1532,7 @@ Example response:
 }
 ~~~
 
-## get_nvme_controllers {#rpc_get_nvme_controllers}
+## bdev_nvme_get_controllers {#rpc_bdev_nvme_get_controllers}
 
 Get information about NVMe controllers.
 
@@ -1551,7 +1557,7 @@ Example request:
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "method": "get_nvme_controllers",
+  "method": "bdev_nvme_get_controllers",
   "params": {
     "name": "Nvme0"
   }
@@ -1718,7 +1724,7 @@ Example response:
 ## bdev_delay_create {#rpc_bdev_delay_create}
 
 Create delay bdev. This bdev type redirects all IO to it's base bdev and inserts a delay on the completion
-path to create an artificial drive latency.
+path to create an artificial drive latency. All latency values supplied to this bdev should be in microseconds.
 
 ### Parameters
 
@@ -1801,7 +1807,49 @@ Example response:
 }
 ~~~
 
-## construct_error_bdev {#rpc_construct_error_bdev}
+## bdev_delay_update_latency {#rpc_bdev_delay_update_latency}
+
+Update a target latency value associated with a given delay bdev. Any currently
+outstanding I/O will be completed with the old latency.
+
+### Parameters
+
+Name                    | Optional | Type        | Description
+----------------------- | -------- | ----------- | -----------
+delay_bdev_name         | Required | string      | Name of the delay bdev
+latency_type            | Required | string      | One of: avg_read, avg_write, p99_read, p99_write
+latency_us              | Required | number      | The new latency value in microseconds
+
+### Result
+
+Name of newly created bdev.
+
+### Example
+
+Example request:
+
+~~~
+{
+  "params": {
+    "delay_bdev_name": "Delay0",
+    "latency_type": "avg_read",
+    "latency_us": "100",
+  },
+  "jsonrpc": "2.0",
+  "method": "bdev_delay_update_latency",
+  "id": 1
+}
+~~~
+
+Example response:
+
+~~~
+{
+  "result": "true"
+}
+~~~
+
+## bdev_error_create {#rpc_bdev_error_create}
 
 Construct error bdev.
 
@@ -1821,7 +1869,7 @@ Example request:
     "base_name": "Malloc0"
   },
   "jsonrpc": "2.0",
-  "method": "construct_error_bdev",
+  "method": "bdev_error_create",
   "id": 1
 }
 ~~~
@@ -1836,7 +1884,7 @@ Example response:
 }
 ~~~
 
-## delete_error_bdev {#rpc_delete_error_bdev}
+## bdev_error_delete {#rpc_bdev_error_delete}
 
 Delete error bdev
 
@@ -1860,7 +1908,7 @@ Example request:
     "name": "EE_Malloc0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_error_bdev",
+  "method": "bdev_error_delete",
   "id": 1
 }
 ~~~
@@ -1875,7 +1923,7 @@ Example response:
 }
 ~~~
 
-## construct_iscsi_bdev {#rpc_construct_iscsi_bdev}
+## bdev_iscsi_create {#rpc_bdev_iscsi_create}
 
 Connect to iSCSI target and create bdev backed by this connection.
 
@@ -1905,7 +1953,7 @@ Example request:
     "name": "iSCSI0"
   },
   "jsonrpc": "2.0",
-  "method": "construct_iscsi_bdev",
+  "method": "bdev_iscsi_create",
   "id": 1
 }
 ~~~
@@ -1920,7 +1968,7 @@ Example response:
 }
 ~~~
 
-## delete_iscsi_bdev {#rpc_delete_iscsi_bdev}
+## bdev_iscsi_delete {#rpc_bdev_iscsi_delete}
 
 Delete iSCSI bdev and terminate connection to target.
 
@@ -1942,7 +1990,7 @@ Example request:
     "name": "iSCSI0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_iscsi_bdev",
+  "method": "bdev_iscsi_delete",
   "id": 1
 }
 ~~~
@@ -2183,7 +2231,7 @@ Example response:
 }
 ~~~
 
-## construct_pmem_bdev {#rpc_construct_pmem_bdev}
+## bdev_pmem_create {#rpc_bdev_pmem_create}
 
 Construct @ref bdev_config_pmem bdev.
 
@@ -2211,7 +2259,7 @@ Example request:
     "name": "Pmem0"
   },
   "jsonrpc": "2.0",
-  "method": "construct_pmem_bdev",
+  "method": "bdev_pmem_create",
   "id": 1
 }
 ~~~
@@ -2226,7 +2274,7 @@ Example response:
 }
 ~~~
 
-## delete_pmem_bdev {#rpc_delete_pmem_bdev}
+## bdev_pmem_delete {#rpc_bdev_pmem_delete}
 
 Delete @ref bdev_config_pmem bdev. This call will not remove backing pool files.
 
@@ -2252,7 +2300,7 @@ Example request:
     "name": "Pmem0"
   },
   "jsonrpc": "2.0",
-  "method": "delete_pmem_bdev",
+  "method": "bdev_pmem_delete",
   "id": 1
 }
 ~~~
@@ -3606,6 +3654,7 @@ Initialize an NVMe-oF transport with the given options.
 Name                        | Optional | Type    | Description
 --------------------------- | -------- | --------| -----------
 trtype                      | Required | string  | Transport type (ex. RDMA)
+tgt_name                    | Optional | string  | Parent NVMe-oF target name.
 max_queue_depth             | Optional | number  | Max number of outstanding I/O per queue
 max_qpairs_per_ctrlr        | Optional | number  | Max number of SQ and CQ per controller
 in_capsule_data_size        | Optional | number  | Max number of in-capsule data size
@@ -3650,7 +3699,9 @@ Example response:
 
 ### Parameters
 
-This method has no parameters.
+Name                        | Optional | Type        | Description
+--------------------------- | -------- | ------------| -----------
+tgt_name                    | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -3713,6 +3764,7 @@ Construct an NVMe over Fabrics target subsystem.
 Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 serial_number           | Optional | string      | Serial number of virtual controller
 model_number            | Optional | string      | Model number of virtual controller
 max_namespaces          | Optional | number      | Maximum number of namespaces that can be attached to the subsystem. Default: 0 (Unlimited)
@@ -3755,6 +3807,7 @@ Delete an existing NVMe-oF subsystem.
 Parameter              | Optional | Type        | Description
 ---------------------- | -------- | ----------- | -----------
 nqn                    | Required | string      | Subsystem NQN to delete.
+tgt_name               | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -3790,6 +3843,7 @@ Add a new listen address to an NVMe-oF subsystem.
 Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 listen_address          | Required | object      | @ref rpc_nvmf_listen_address object
 
 ### listen_address {#rpc_nvmf_listen_address}
@@ -3842,6 +3896,7 @@ Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
 namespace               | Required | object      | @ref rpc_nvmf_namespace object
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 
 ### namespace {#rpc_nvmf_namespace}
 
@@ -3894,6 +3949,7 @@ Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
 nsid                    | Required | number      | Namespace ID
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -3931,6 +3987,7 @@ Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
 host                    | Required | string      | Host NQN to add to the list of allowed host NQNs
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -3968,6 +4025,7 @@ Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
 host                    | Required | string      | Host NQN to remove from the list of allowed host NQNs
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -4005,6 +4063,7 @@ Name                    | Optional | Type        | Description
 ----------------------- | -------- | ----------- | -----------
 nqn                     | Required | string      | Subsystem NQN
 allow_any_host          | Required | boolean     | Allow any host (`true`) or enforce allowed host whitelist (`false`).
+tgt_name                | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -4108,7 +4167,9 @@ Example response:
 
 ### Parameters
 
-This method has no parameters.
+Name                        | Optional | Type        | Description
+--------------------------- | -------- | ------------| -----------
+tgt_name                    | Optional | string      | Parent NVMe-oF target name.
 
 ### Example
 
@@ -4147,7 +4208,9 @@ Retrieve current statistics of the NVMf subsystem.
 
 ### Parameters
 
-This method has no parameters.
+Name                        | Optional | Type        | Description
+--------------------------- | -------- | ------------| -----------
+tgt_name                    | Optional | string      | Parent NVMe-oF target name.
 
 ### Response
 
@@ -4707,7 +4770,7 @@ The alias of the logical volume takes the format _lvs_name/lvol_name_ where:
 * _lvs_name_ is the name of the logical volume store.
 * _lvol_name_ is specified on creation and can be renamed.
 
-## construct_lvol_store {#rpc_construct_lvol_store}
+## bdev_lvol_create_lvstore {#rpc_bdev_lvol_create_lvstore}
 
 Construct a logical volume store.
 
@@ -4732,7 +4795,7 @@ Example request:
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "method": "construct_lvol_store",
+  "method": "bdev_lvol_create_lvstore",
   "params": {
     "lvs_name": "LVS0",
     "bdev_name": "Malloc0"
@@ -4751,7 +4814,7 @@ Example response:
 }
 ~~~
 
-## destroy_lvol_store {#rpc_destroy_lvol_store}
+## bdev_lvol_delete_lvstore {#rpc_bdev_lvol_delete_lvstore}
 
 Destroy a logical volume store.
 
@@ -4771,7 +4834,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "destroy_lvol_store",
+  "method": "bdev_lvol_delete_lvstore",
   "id": 1
   "params": {
     "uuid": "a9959197-b5e2-4f2d-8095-251ffb6985a5"
@@ -4789,7 +4852,7 @@ Example response:
 }
 ~~~
 
-## get_lvol_stores {#rpc_get_lvol_stores}
+## bdev_lvol_get_lvstores {#rpc_bdev_lvol_get_lvstores}
 
 Get a list of logical volume stores.
 
@@ -4810,7 +4873,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "get_lvol_stores",
+  "method": "bdev_lvol_get_lvstores",
   "id": 1,
   "params": {
     "lvs_name": "LVS0"
@@ -4838,7 +4901,7 @@ Example response:
 }
 ~~~
 
-## rename_lvol_store {#rpc_rename_lvol_store}
+## bdev_lvol_rename_lvstore {#rpc_bdev_lvol_rename_lvstore}
 
 Rename a logical volume store.
 
@@ -4856,7 +4919,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "rename_lvol_store",
+  "method": "bdev_lvol_rename_lvstore",
   "id": 1,
   "params": {
     "old_name": "LVS0",
@@ -4875,7 +4938,7 @@ Example response:
 }
 ~~~
 
-## construct_lvol_bdev {#rpc_construct_lvol_bdev}
+## bdev_lvol_create {#rpc_bdev_lvol_create}
 
 Create a logical volume on a logical volume store.
 
@@ -4904,7 +4967,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "construct_lvol_bdev",
+  "method": "bdev_lvol_create",
   "id": 1,
   "params": {
     "lvol_name": "LVOL0",
@@ -4926,7 +4989,7 @@ Example response:
 }
 ~~~
 
-## snapshot_lvol_bdev {#rpc_snapshot_lvol_bdev}
+## bdev_lvol_snapshot {#rpc_bdev_lvol_snapshot}
 
 Capture a snapshot of the current state of a logical volume.
 
@@ -4948,7 +5011,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "snapshot_lvol_bdev",
+  "method": "bdev_lvol_snapshot",
   "id": 1,
   "params": {
     "lvol_name": "1b38702c-7f0c-411e-a962-92c6a5a8a602",
@@ -4967,7 +5030,7 @@ Example response:
 }
 ~~~
 
-## clone_lvol_bdev {#rpc_clone_lvol_bdev}
+## bdev_lvol_clone {#rpc_bdev_lvol_clone}
 
 Create a logical volume based on a snapshot.
 
@@ -4989,7 +5052,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0"
-  "method": "clone_lvol_bdev",
+  "method": "bdev_lvol_clone",
   "id": 1,
   "params": {
     "snapshot_name": "cc8d7fdf-7865-4d1f-9fc6-35da8e368670",
@@ -5008,7 +5071,7 @@ Example response:
 }
 ~~~
 
-## rename_lvol_bdev {#rpc_rename_lvol_bdev}
+## bdev_lvol_rename {#rpc_bdev_lvol_rename}
 
 Rename a logical volume. New name will rename only the alias of the logical volume.
 
@@ -5026,7 +5089,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "rename_lvol_bdev",
+  "method": "bdev_lvol_rename",
   "id": 1,
   "params": {
     "old_name": "067df606-6dbc-4143-a499-0d05855cb3b8",
@@ -5045,7 +5108,7 @@ Example response:
 }
 ~~~
 
-## resize_lvol_bdev {#rpc_resize_lvol_bdev}
+## bdev_lvol_resize {#rpc_bdev_lvol_resize}
 
 Resize a logical volume.
 
@@ -5063,7 +5126,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "resize_lvol_bdev",
+  "method": "bdev_lvol_resize",
   "id": 1,
   "params": {
     "name": "51638754-ca16-43a7-9f8f-294a0805ab0a",
@@ -5082,7 +5145,7 @@ Example response:
 }
 ~~~
 
-## set_read_only_lvol_bdev{#rpc_set_read_only_lvol_bdev}
+## bdev_lvol_set_read_only{#rpc_bdev_lvol_set_read_only}
 
 Mark logical volume as read only.
 
@@ -5099,7 +5162,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "set_read_only_lvol_bdev",
+  "method": "bdev_lvol_set_read_only",
   "id": 1,
   "params": {
     "name": "51638754-ca16-43a7-9f8f-294a0805ab0a",
@@ -5117,7 +5180,7 @@ Example response:
 }
 ~~~
 
-## destroy_lvol_bdev {#rpc_destroy_lvol_bdev}
+## bdev_lvol_delete {#rpc_bdev_lvol_delete}
 
 Destroy a logical volume.
 
@@ -5134,7 +5197,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "destroy_lvol_bdev",
+  "method": "bdev_lvol_delete",
   "id": 1,
   "params": {
     "name": "51638754-ca16-43a7-9f8f-294a0805ab0a"
@@ -5152,7 +5215,7 @@ Example response:
 }
 ~~~
 
-## inflate_lvol_bdev {#rpc_inflate_lvol_bdev}
+## bdev_lvol_inflate {#rpc_bdev_lvol_inflate}
 
 Inflate a logical volume. All unallocated clusters are allocated and copied from the parent or zero filled if not allocated in the parent. Then all dependencies on the parent are removed.
 
@@ -5169,7 +5232,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "inflate_lvol_bdev",
+  "method": "bdev_lvol_inflate",
   "id": 1,
   "params": {
     "name": "8d87fccc-c278-49f0-9d4c-6237951aca09"
@@ -5187,7 +5250,7 @@ Example response:
 }
 ~~~
 
-## decouple_parent_lvol_bdev {#rpc_decouple_parent_lvol_bdev}
+## bdev_lvol_decouple_parent {#rpc_bdev_lvol_decouple_parent}
 
 Decouple the parent of a logical volume. For unallocated clusters which is allocated in the parent, they are allocated and copied from the parent, but for unallocated clusters which is thin provisioned in the parent, they are kept thin provisioned. Then all dependencies on the parent are removed.
 
@@ -5204,7 +5267,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "decouple_parent_lvol_bdev",
+  "method": "bdev_lvol_decouple_parent",
   "id": 1.
   "params": {
     "name": "8d87fccc-c278-49f0-9d4c-6237951aca09"
@@ -5577,11 +5640,11 @@ Example response:
 
 # Miscellaneous RPC commands
 
-## send_nvme_cmd {#rpc_send_nvme_cmd}
+## bdev_nvme_send_cmd {#rpc_bdev_nvme_send_cmd}
 
 Send NVMe command directly to NVMe controller or namespace. Parameters and responses encoded by base64 urlsafe need further processing.
 
-Notice: send_nvme_cmd requires user to guarentee the correctness of NVMe command itself, and also optional parameters. Illegal command contents or mismatching buffer size may result in unpredictable behavior.
+Notice: bdev_nvme_send_cmd requires user to guarentee the correctness of NVMe command itself, and also optional parameters. Illegal command contents or mismatching buffer size may result in unpredictable behavior.
 
 ### Parameters
 
@@ -5612,7 +5675,7 @@ Example request:
 ~~~
 {
   "jsonrpc": "2.0",
-  "method": "send_nvme_cmd",
+  "method": "bdev_nvme_send_cmd",
   "id": 1,
   "params": {
     "name": "Nvme0",

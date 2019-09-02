@@ -16,10 +16,10 @@ rpc_py="$rootdir/scripts/rpc.py"
 # Remove lvol bdevs and stores.
 function remove_backends() {
 	echo "INFO: Removing lvol bdev"
-	$rpc_py destroy_lvol_bdev "lvs_0/lbd_0"
+	$rpc_py bdev_lvol_delete "lvs_0/lbd_0"
 
 	echo "INFO: Removing lvol stores"
-	$rpc_py destroy_lvol_store -l lvs_0
+	$rpc_py bdev_lvol_delete_lvstore -l lvs_0
 
 	echo "INFO: Removing NVMe"
 	$rpc_py delete_nvme_controller Nvme0
@@ -33,7 +33,7 @@ $ISCSI_APP -m $ISCSI_TEST_CORE_MASK --wait-for-rpc &
 pid=$!
 echo "Process pid: $pid"
 
-trap "killprocess $pid; iscsitestfini $1 $2; exit 1" SIGINT SIGTERM EXIT
+trap 'killprocess $pid; iscsitestfini $1 $2; exit 1' SIGINT SIGTERM EXIT
 
 waitforlisten $pid
 $rpc_py set_iscsi_options -o 30 -a 16
@@ -47,13 +47,13 @@ $rpc_py add_portal_group $PORTAL_TAG $TARGET_IP:$ISCSI_PORT
 $rpc_py add_initiator_group $INITIATOR_TAG $INITIATOR_NAME $NETMASK
 $rpc_py construct_nvme_bdev -b "Nvme0" -t "pcie" -a $bdf
 
-ls_guid=$($rpc_py construct_lvol_store Nvme0n1 lvs_0)
+ls_guid=$($rpc_py bdev_lvol_create_lvstore Nvme0n1 lvs_0)
 free_mb=$(get_lvs_free_mb "$ls_guid")
 # Using maximum 2048MiB to reduce the test time
 if [ $free_mb -gt 2048 ]; then
-	$rpc_py construct_lvol_bdev -u $ls_guid lbd_0 2048
+	$rpc_py bdev_lvol_create -u $ls_guid lbd_0 2048
 else
-	$rpc_py construct_lvol_bdev -u $ls_guid lbd_0 $free_mb
+	$rpc_py bdev_lvol_create -u $ls_guid lbd_0 $free_mb
 fi
 # "lvs_0/lbd_0:0" ==> use lvs_0/lbd_0 blockdev for LUN0
 # "1:2" ==> map PortalGroup1 to InitiatorGroup2
@@ -66,7 +66,7 @@ iscsiadm -m discovery -t sendtargets -p $TARGET_IP:$ISCSI_PORT
 iscsiadm -m node --login -p $TARGET_IP:$ISCSI_PORT
 waitforiscsidevices 1
 
-trap "remove_backends; umount /mnt/device; rm -rf /mnt/device; iscsicleanup; killprocess $pid; iscsitestfini $1 $2; exit 1" SIGINT SIGTERM EXIT
+trap 'remove_backends; umount /mnt/device; rm -rf /mnt/device; iscsicleanup; killprocess $pid; iscsitestfini $1 $2; exit 1' SIGINT SIGTERM EXIT
 
 mkdir -p /mnt/device
 

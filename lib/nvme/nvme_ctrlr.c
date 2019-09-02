@@ -111,12 +111,20 @@ spdk_nvme_ctrlr_get_default_ctrlr_opts(struct spdk_nvme_ctrlr_opts *opts, size_t
 		opts->use_cmb_sqs = true;
 	}
 
+	if (FIELD_OK(no_shn_notification)) {
+		opts->no_shn_notification = false;
+	}
+
 	if (FIELD_OK(arb_mechanism)) {
 		opts->arb_mechanism = SPDK_NVME_CC_AMS_RR;
 	}
 
 	if (FIELD_OK(keep_alive_timeout_ms)) {
 		opts->keep_alive_timeout_ms = MIN_KEEP_ALIVE_TIMEOUT_IN_MS;
+	}
+
+	if (FIELD_OK(transport_retry_count)) {
+		opts->transport_retry_count = SPDK_NVME_DEFAULT_RETRY_COUNT;
 	}
 
 	if (FIELD_OK(io_queue_size)) {
@@ -673,6 +681,30 @@ nvme_ctrlr_enable(struct spdk_nvme_ctrlr *ctrlr)
 	}
 
 	cc.bits.ams = ctrlr->opts.arb_mechanism;
+
+	if (nvme_ctrlr_set_cc(ctrlr, &cc)) {
+		SPDK_ERRLOG("set_cc() failed\n");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int
+nvme_ctrlr_disable(struct spdk_nvme_ctrlr *ctrlr)
+{
+	union spdk_nvme_cc_register	cc;
+
+	if (nvme_ctrlr_get_cc(ctrlr, &cc)) {
+		SPDK_ERRLOG("get_cc() failed\n");
+		return -EIO;
+	}
+
+	if (cc.bits.en == 0) {
+		return 0;
+	}
+
+	cc.bits.en = 0;
 
 	if (nvme_ctrlr_set_cc(ctrlr, &cc)) {
 		SPDK_ERRLOG("set_cc() failed\n");
@@ -2032,18 +2064,18 @@ nvme_ctrlr_process_init(struct spdk_nvme_ctrlr *ctrlr)
 	switch (ctrlr->state) {
 	case NVME_CTRLR_STATE_INIT_DELAY:
 		nvme_ctrlr_set_state(ctrlr, NVME_CTRLR_STATE_INIT, ready_timeout_in_ms);
-		/*
-		 * Controller may need some delay before it's enabled.
-		 *
-		 * This is a workaround for an issue where the PCIe-attached NVMe controller
-		 * is not ready after VFIO reset. We delay the initialization rather than the
-		 * enabling itself, because this is required only for the very first enabling
-		 * - directly after a VFIO reset.
-		 *
-		 * TODO: Figure out what is actually going wrong.
-		 */
-		SPDK_DEBUGLOG(SPDK_LOG_NVME, "Adding 2 second delay before initializing the controller\n");
-		ctrlr->sleep_timeout_tsc = spdk_get_ticks() + (2000 * spdk_get_ticks_hz() / 1000);
+		if (ctrlr->quirks & NVME_QUIRK_DELAY_BEFORE_INIT) {
+			/*
+			 * Controller may need some delay before it's enabled.
+			 *
+			 * This is a workaround for an issue where the PCIe-attached NVMe controller
+			 * is not ready after VFIO reset. We delay the initialization rather than the
+			 * enabling itself, because this is required only for the very first enabling
+			 * - directly after a VFIO reset.
+			 */
+			SPDK_DEBUGLOG(SPDK_LOG_NVME, "Adding 2 second delay before initializing the controller\n");
+			ctrlr->sleep_timeout_tsc = spdk_get_ticks() + (2000 * spdk_get_ticks_hz() / 1000);
+		}
 		break;
 
 	case NVME_CTRLR_STATE_INIT:
@@ -2362,7 +2394,13 @@ nvme_ctrlr_destruct(struct spdk_nvme_ctrlr *ctrlr)
 
 	nvme_ctrlr_free_doorbell_buffer(ctrlr);
 
-	nvme_ctrlr_shutdown(ctrlr);
+	if (ctrlr->opts.no_shn_notification) {
+		SPDK_INFOLOG(SPDK_LOG_NVME, "Disable SSD: %s without shutdown notification\n",
+			     ctrlr->trid.traddr);
+		nvme_ctrlr_disable(ctrlr);
+	} else {
+		nvme_ctrlr_shutdown(ctrlr);
+	}
 
 	nvme_ctrlr_destruct_namespaces(ctrlr);
 

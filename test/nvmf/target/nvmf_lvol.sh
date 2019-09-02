@@ -27,15 +27,15 @@ fi
 $rpc_py nvmf_create_transport $NVMF_TRANSPORT_OPTS -u 8192
 
 # Construct a RAID volume for the logical volume store
-base_bdevs="$($rpc_py construct_malloc_bdev $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE) "
-base_bdevs+=$($rpc_py construct_malloc_bdev $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)
+base_bdevs="$($rpc_py bdev_malloc_create $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE) "
+base_bdevs+=$($rpc_py bdev_malloc_create $MALLOC_BDEV_SIZE $MALLOC_BLOCK_SIZE)
 $rpc_py construct_raid_bdev -n raid0 -z 64 -r 0 -b "$base_bdevs"
 
 # Create the logical volume store on the RAID volume
-lvs=$($rpc_py construct_lvol_store raid0 lvs)
+lvs=$($rpc_py bdev_lvol_create_lvstore raid0 lvs)
 
 # Create a logical volume on the logical volume store
-lvol=$($rpc_py construct_lvol_bdev -u $lvs lvol $LVOL_BDEV_INIT_SIZE)
+lvol=$($rpc_py bdev_lvol_create -u $lvs lvol $LVOL_BDEV_INIT_SIZE)
 
 # Create an NVMe-oF subsystem and add the logical volume as a namespace
 $rpc_py nvmf_subsystem_create nqn.2016-06.io.spdk:cnode0 -a -s SPDK0
@@ -49,18 +49,18 @@ perf_pid=$!
 sleep 1
 
 # Perform some operations on the logical volume
-snapshot=$($rpc_py snapshot_lvol_bdev $lvol "MY_SNAPSHOT")
-$rpc_py resize_lvol_bdev $lvol $LVOL_BDEV_FINAL_SIZE
-clone=$($rpc_py clone_lvol_bdev $snapshot "MY_CLONE")
-$rpc_py inflate_lvol_bdev $clone
+snapshot=$($rpc_py bdev_lvol_snapshot $lvol "MY_SNAPSHOT")
+$rpc_py bdev_lvol_resize $lvol $LVOL_BDEV_FINAL_SIZE
+clone=$($rpc_py bdev_lvol_clone $snapshot "MY_CLONE")
+$rpc_py bdev_lvol_inflate $clone
 
 # Wait for I/O to complete
 wait $perf_pid
 
 # Clean up
 $rpc_py delete_nvmf_subsystem nqn.2016-06.io.spdk:cnode0
-$rpc_py destroy_lvol_bdev $lvol
-$rpc_py destroy_lvol_store -u $lvs
+$rpc_py bdev_lvol_delete $lvol
+$rpc_py bdev_lvol_delete_lvstore -u $lvs
 
 rm -f ./local-job*
 
